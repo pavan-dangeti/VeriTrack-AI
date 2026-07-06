@@ -39,3 +39,5 @@ htmlcov/
 
 # Bytecode
 *.egg-info/
+
+.DS_Store
