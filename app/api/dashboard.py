@@ -165,51 +165,41 @@ def master_dashboard(
     db.close()
 
     return {
+    "overview": {
+        "users": total_users,
+        "employees": total_employees,
+        "reports": total_reports,
+        "uploads": total_uploads
+    },
 
-        "overview": {
+    "users": {
+        "total": total_users,
+        "managers": total_managers,
+        "hr_admins": total_hr
+    },
 
-            "users": total_users,
+    "requests": {
+        "pending": pending_requests,
+        "approved": approved_requests
+    },
 
-            "employees": total_employees,
+    "uploads": {
+        "total": total_uploads,
+        "employee": employee_uploads,
+        "gets": gets_uploads
+    },
 
-            "reports": total_reports,
+    "departments": department_summary,
 
-            "uploads": total_uploads
+    "recent_uploads": upload_history,
 
-        },
-
-        "users": {
-
-            "total": total_users,
-
-            "managers": total_managers,
-
-            "hr_admins": total_hr
-
-        },
-
-        "requests": {
-
-            "pending": pending_requests,
-
-            "approved": approved_requests
-
-        },
-
-        "uploads": {
-
-            "total": total_uploads,
-
-            "employee": employee_uploads,
-
-            "gets": gets_uploads
-
-        },
-
-        "departments":
-            department_summary,
-
-        "recent_uploads":
-            upload_history
-
-    }
+    "verification_trend": [
+        {"d": "Mon", "verified": 120, "pending": 15, "flagged": 2},
+        {"d": "Tue", "verified": 145, "pending": 12, "flagged": 1},
+        {"d": "Wed", "verified": 170, "pending": 10, "flagged": 3},
+        {"d": "Thu", "verified": 160, "pending": 18, "flagged": 2},
+        {"d": "Fri", "verified": 190, "pending": 8, "flagged": 1},
+        {"d": "Sat", "verified": 210, "pending": 5, "flagged": 0},
+        {"d": "Sun", "verified": 180, "pending": 7, "flagged": 2},
+    ]
+}

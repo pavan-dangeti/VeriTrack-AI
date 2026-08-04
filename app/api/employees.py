@@ -8,6 +8,10 @@ from app.models.employee import Employee
 
 from app.auth.dependencies import get_current_user
 from app.db.database import SessionLocal
+from app.schemas.employee import (
+    EmployeeResponse,
+    EmployeeListResponse,
+)
 
 router = APIRouter(
     prefix="/employees",
@@ -15,7 +19,10 @@ router = APIRouter(
 )
 
 
-@router.get("/my")
+@router.get(
+    "/my",
+    response_model=EmployeeListResponse,
+)
 def my_employees(
 
     page: int = 1,
