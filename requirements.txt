@@ -1,0 +1,33 @@
+fastapi>=0.118
+uvicorn[standard]>=0.37
+sqlalchemy[asyncio]>=2.0.43
+asyncpg>=0.30.0
+alembic>=1.16
+pydantic>=2.12
+email-validator>=2.2
+pydantic-settings>=2.10
+bcrypt>=5.0
+PyJWT[crypto]>=2.10
+httpx>=0.28
+structlog>=25.4
+slowapi>=0.1.9
+
+# dev
+pytest>=8.4
+pytest-asyncio>=1.1
+ruff>=0.12
+
+# ---- Prompt #2: core business features ----
+celery[redis]>=5.5
+redis>=5.2
+openpyxl>=3.1
+xlrd>=2.0
+reportlab>=4.4
+pillow>=11.0
+pypdf>=5.9
+filetype>=1.2
+python-multipart>=0.0.20
+
+# ---- OCR (Prompt 2.5) ----
+rapidocr-onnxruntime>=1.4
+pypdfium2>=4.30

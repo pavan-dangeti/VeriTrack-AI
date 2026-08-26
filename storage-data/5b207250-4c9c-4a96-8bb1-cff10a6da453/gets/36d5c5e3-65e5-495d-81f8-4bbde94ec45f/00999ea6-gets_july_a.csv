@@ -1,0 +1,8 @@
+EMP CODE,Emp Name,Customer Leave,Sacha Leave
+E-100,Ann Weaver,✓,
+E-200,Bob Chen,X,✓
+E-999,Ghost Person,✔,
+   ,   ,YES ,
+E-300,Cid Reyes,YES,-
+E-500,Evan Wright,[x],
+E-600,Faith Khan,x,y

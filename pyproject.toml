@@ -1,0 +1,19 @@
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+filterwarnings = ["ignore::DeprecationWarning"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py314"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "S"]
+ignore = [
+    "S101",  # asserts allowed in tests
+    "B008",  # FastAPI: Depends(...) in parameter defaults is idiomatic
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/conftest.py" = ["E402"]  # env config must precede app imports
+"tests/*" = ["S106", "S105", "B008"]  # test creds + FastAPI Depends defaults
