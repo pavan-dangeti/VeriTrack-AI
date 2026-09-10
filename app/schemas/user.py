@@ -10,6 +10,7 @@ class UserCreate(BaseModel):
     model_config = {"str_strip_whitespace": True}
     email: EmailStr = Field(max_length=320)
     role: UserRole
+    full_name: str | None = Field(default=None, max_length=200)
 
 
 class UserStatusUpdate(BaseModel):
@@ -21,6 +22,7 @@ class UserOut(BaseModel):
     id: uuid.UUID
     role: UserRole
     email: str
+    full_name: str | None = None
     auth_type: str
     is_active: bool
     manager_id: uuid.UUID | None

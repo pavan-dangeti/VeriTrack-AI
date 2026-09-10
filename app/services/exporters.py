@@ -14,6 +14,17 @@ DEFAULT_EXPORT_COLUMNS = [
 ]
 
 
+_FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r", "\x0b")
+
+
+def _escape_formula(value: str) -> str:
+    """Neutralize spreadsheet-formula injection: prefix dangerous cell
+    values with an apostrophe so Excel/Sheets/LibreOffice treat them as text."""
+    if value.lstrip(" ")[:1] in _FORMULA_PREFIXES:
+        return "'" + value
+    return value
+
+
 def _flatten_rows(rows: list[dict], columns: list[str]) -> tuple[list[str], list[list]]:
     """columns may include extra fields like 'customer leave'."""
     header = []
@@ -27,7 +38,7 @@ def _flatten_rows(rows: list[dict], columns: list[str]) -> tuple[list[str], list
         record = dict(r or {})
         extras = record.pop("extra", {}) or {}
         merged = {**{k: v for k, v in record.items() if k != "extra"}, **extras}
-        out.append([str(merged.get(c, "") or "") for c in columns])
+        out.append([_escape_formula(str(merged.get(c, "") or "")) for c in columns])
     return header, out
 
 

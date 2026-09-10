@@ -74,7 +74,7 @@ class AnalysisRun(Base):
     )
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
-    violations_list: Mapped[list[ViolationResult]] = relationship(
+    violations_list: Mapped[list["ViolationResult"]] = relationship(
         back_populates="run", cascade="all, delete-orphan"
     )
 
@@ -112,7 +112,7 @@ class ViolationResult(Base):
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
 
-    run: Mapped[AnalysisRun] = relationship(back_populates="violations_list")
+    run: Mapped["AnalysisRun"] = relationship(back_populates="violations_list")
 
 
 class GeneratedReport(Base):

@@ -1,7 +1,17 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, Text, UniqueConstraint, func, text
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    Text,
+    UniqueConstraint,
+    func,
+    text,
+)
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -32,18 +42,25 @@ class Employee(Base):
         nullable=True,
     )
     is_deleted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # OCR review state (copied from the winning extracted row at import time;
+    # cleared by any manual correction — see employee_service.apply_correction)
+    needs_review: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False, server_default=text("false")
+    )
+    review_note: Mapped[str | None] = mapped_column(Text)
+    ocr_confidence: Mapped[float | None] = mapped_column(Float)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
     updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
-    versions: Mapped[list[EmployeeVersion]] = relationship(
+    versions: Mapped[list["EmployeeVersion"]] = relationship(
         back_populates="employee",
         cascade="all, delete-orphan",
         foreign_keys="EmployeeVersion.employee_id",
         order_by="EmployeeVersion.version_no.desc()",
     )
-    current_version: Mapped[EmployeeVersion | None] = relationship(
+    current_version: Mapped["EmployeeVersion | None"] = relationship(
         foreign_keys=[current_version_id], lazy="selectin"
     )
 

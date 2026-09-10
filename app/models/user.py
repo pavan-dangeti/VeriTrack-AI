@@ -31,6 +31,7 @@ class User(Base):
         Enum(UserRole, name="user_role", native_enum=True), nullable=False
     )
     email: Mapped[str] = mapped_column(Text, nullable=False)
+    full_name: Mapped[str | None] = mapped_column(Text, nullable=True)
     auth_type: Mapped[AuthType] = mapped_column(
         Enum(AuthType, name="auth_type", native_enum=True), nullable=False
     )
@@ -59,7 +60,7 @@ class User(Base):
     )
     locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
-    manager: Mapped[User | None] = relationship(
+    manager: Mapped["User | None"] = relationship(
         "User", remote_side=[id], foreign_keys=[manager_id], lazy="selectin"
     )
 
@@ -68,6 +69,7 @@ class User(Base):
             "id": str(self.id),
             "role": self.role.value,
             "email": self.email,
+            "full_name": self.full_name,
             "auth_type": self.auth_type.value,
             "is_active": self.is_active,
             "manager_id": str(self.manager_id) if self.manager_id else None,

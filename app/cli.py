@@ -23,7 +23,9 @@ from app.models.user import AuthType, User, UserRole
 from app.services import audit_service
 
 
-async def create_master_admin(email: str, password: str, if_not_exists: bool) -> int:
+async def create_master_admin(
+    email: str, password: str, if_not_exists: bool
+) -> tuple[int, bool]:
     factory = get_session_factory()
     async with factory() as db:
         existing_ma = (
@@ -32,9 +34,9 @@ async def create_master_admin(email: str, password: str, if_not_exists: bool) ->
         if existing_ma is not None:
             if if_not_exists:
                 print(f"Master Admin already exists: {existing_ma.email}")
-                return 0
+                return 0, False
             print("ERROR: a Master Admin already exists", file=sys.stderr)
-            return 1
+            return 1, False
 
         email_norm = email.strip().lower()
         dup = await db.execute(
@@ -43,7 +45,7 @@ async def create_master_admin(email: str, password: str, if_not_exists: bool) ->
         if dup.scalar_one_or_none() is not None:
             print(f"ERROR: email already in use by another account: {email_norm}",
                   file=sys.stderr)
-            return 1
+            return 1, False
 
         admin = User(
             email=email_norm,
@@ -63,7 +65,7 @@ async def create_master_admin(email: str, password: str, if_not_exists: bool) ->
             target_id=str(admin.id),
         )
         print(f"Master Admin created: {email_norm}")
-        return 0
+        return 0, True
 
 
 async def approve_domain(domain: str, creator_email: str) -> int:
@@ -109,9 +111,21 @@ def main() -> int:
     configure_logging()
 
     if args.command == "create-master-admin":
-        return asyncio.run(
-            create_master_admin(args.email, args.password, args.if_not_exists)
+        generated = args.password is None
+        if generated:
+            # No --password flag and no SEED_ADMIN_PASSWORD env: generate a
+            # strong random password and print it once (never stored/logged).
+            from app.core.security import generate_initial_password
+
+            password = generate_initial_password()
+        else:
+            password = args.password
+        rc, created = asyncio.run(
+            create_master_admin(args.email, password, args.if_not_exists)
         )
+        if generated and created:
+            print(f"Generated Master Admin password (shown once): {password}")
+        return rc
     if args.command == "approve-domain":
         return asyncio.run(approve_domain(args.domain, args.creator_email))
     return 2

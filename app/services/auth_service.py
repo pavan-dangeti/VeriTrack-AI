@@ -108,35 +108,23 @@ async def authenticate_password(
         )
         raise AuthError(401, "invalid_credentials", "Invalid email or password")
 
-    if user.locked_until is not None and user.locked_until > now:
-        await audit_service.record(
-            db,
-            action=audit_service.ACTION_LOGIN,
-            result=audit_service.AuditResult.DENIED,
-            actor_user_id=user.id,
-            ip_address=ip_address,
-            user_agent=user_agent,
-            metadata={
-                "reason": "locked_out",
-                "locked_until": user.locked_until.isoformat(),
-            },
-        )
-        raise AuthError(
-            423,
-            "account_locked",
-            "Account temporarily locked due to repeated failed logins. Try again later.",
-        )
-
+    # Verify FIRST: a correct password always authenticates, even while locked,
+    # so an attacker can neither DoS the owner out of their account nor detect
+    # lockout state (there is no lockout-specific response anymore).
     password_ok = user.auth_type is AuthType.PASSWORD and verify_password(
         password, user.password_hash or ""
     )
+
     if not password_ok:
-        user.failed_login_attempts += 1
-        locked_now = False
-        if user.failed_login_attempts >= settings.lockout_threshold:
-            user.locked_until = now + timedelta(minutes=settings.lockout_duration_minutes)
-            user.failed_login_attempts = 0  # counter resets; lockout clock governs now
-            locked_now = True
+        locked_now = user.locked_until is not None and user.locked_until > now
+        if not locked_now:
+            user.failed_login_attempts += 1
+            if user.failed_login_attempts >= settings.lockout_threshold:
+                user.locked_until = now + timedelta(
+                    minutes=settings.lockout_duration_minutes
+                )
+                user.failed_login_attempts = 0  # lockout clock governs now
+                locked_now = True
         await db.commit()
         await audit_service.record(
             db,
@@ -147,8 +135,9 @@ async def authenticate_password(
             target_id=str(user.id),
             ip_address=ip_address,
             user_agent=user_agent,
-            metadata={"reason": "bad_password", "lockout_triggered": locked_now},
+            metadata={"reason": "bad_password", "locked": locked_now},
         )
+        # Same response as every other failure — no enumeration oracle.
         raise AuthError(401, "invalid_credentials", "Invalid email or password")
 
     user.failed_login_attempts = 0

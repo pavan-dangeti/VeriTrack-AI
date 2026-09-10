@@ -62,7 +62,7 @@ class UploadBatch(Base):
     )
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
-    files: Mapped[list[UploadedFile]] = relationship(back_populates="batch")
+    files: Mapped[list["UploadedFile"]] = relationship(back_populates="batch")
 
 
 class UploadedFile(Base):
@@ -92,8 +92,8 @@ class UploadedFile(Base):
     )
     processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
-    batch: Mapped[UploadBatch] = relationship(back_populates="files")
-    rows: Mapped[list[ExtractedRow]] = relationship(
+    batch: Mapped["UploadBatch"] = relationship(back_populates="files")
+    rows: Mapped[list["ExtractedRow"]] = relationship(
         back_populates="file", cascade="all, delete-orphan"
     )
 
@@ -117,4 +117,4 @@ class ExtractedRow(Base):
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
 
-    file: Mapped[UploadedFile] = relationship(back_populates="rows")
+    file: Mapped["UploadedFile"] = relationship(back_populates="rows")

@@ -85,8 +85,8 @@ def app_for_tests():
 async def seed_master_admin(email: str, password: str):
     from app.cli import create_master_admin
 
-    rc = await create_master_admin(email, password, if_not_exists=False)
-    assert rc == 0
+    rc, created = await create_master_admin(email, password, if_not_exists=False)
+    assert rc == 0 and created
     from app.services.auth_service import get_user_by_email
 
     async with test_session() as db:

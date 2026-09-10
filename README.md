@@ -41,7 +41,8 @@ psql -d postgres -c "CREATE ROLE veritrack LOGIN PASSWORD 'veritrack' CREATEDB"
 psql -d postgres -c "CREATE DATABASE veritrack OWNER veritrack"
 
 alembic upgrade head
-python -m app.cli create-master-admin          # uses SEED_ADMIN_* from .env
+python -m app.cli create-master-admin          # uses SEED_ADMIN_* from .env; without
+                                               # --password it generates one and prints it once
 uvicorn app.main:app --reload                  # http://localhost:8000/docs
 ```
 
@@ -68,9 +69,14 @@ tables between tests. The rate limiter is reset per test.
 ## Bootstrap CLI
 
 ```bash
-python -m app.cli create-master-admin [--email X --password Y] [--if-not-exists]
+python -m app.cli create-master-admin --password 'Your!Strong1Pass'  # or SEED_ADMIN_PASSWORD env
+# no password given => a strong random one is generated and printed exactly once
 python -m app.cli approve-domain contoso.com     # allowlist for SSO logins
 ```
+
+There is no default bootstrap password anywhere. docker-compose fails fast at
+startup if `SEED_ADMIN_PASSWORD` is unset, so a fresh deployment can never
+ship a publicly known Master Admin credential.
 
 The Master Admin is the only seeded account. Everything else is created via the
 API (`POST /api/v1/users`) by an authorized role; the response carries a
@@ -126,3 +132,34 @@ reconstruction handles word-level OCR boxes, multi-word/fuzzy headers
 (`EmployeeID`, `FulName`), and merged-line detections (regex-based field
 extraction fallback). Low-confidence rows are flagged for review or corrected
 by the LLM verifier when an API key is configured.
+
+## Backups & disaster recovery
+
+The single source of truth is PostgreSQL (`veritrack`); uploaded files live in
+object storage (`storage_backend`: local dir or S3), which must be backed up
+alongside the DB.
+
+**Backup schedule (recommended baseline)**
+- DB: `pg_dump --format=custom veritrack` nightly, keep 30 daily + 12 monthly
+  snapshots. On a managed provider (RDS/Cloud SQL/Crunchy/Neon) enable
+  automated backups + point-in-time recovery (PITR) and rely on that instead.
+- Objects: S3 versioning + lifecycle, or nightly `rsync`/`s3 sync` of
+  `LOCAL_STORAGE_ROOT` to a second location.
+- Retention: see `RETENTION_DAYS`; the System Settings → "Purge obsolete data"
+  action removes old batches/reports. Employee records are never hard-deleted.
+
+**Recovery procedure**
+1. Provision a fresh PostgreSQL and restore: `pg_restore --clean --create -d postgres veritrack-<date>.dump`
+   (managed providers: "restore to new instance").
+2. Restore `LOCAL_STORAGE_ROOT` from the file/object backup.
+3. Point the app at the restored DB (`DATABASE_URL`), run `alembic upgrade head`
+   (no-op if the dump is current), then redeploy.
+4. Smoke-check: `/health/ready` must return 200 (DB + Redis), then log in as
+   Master Admin and open one manager's dashboard.
+5. Decide about in-flight Celery jobs: any batch marked PROCESSING/QUEUED at
+   backup time should be re-triggered — files are still in storage, nothing is
+   lost; simply reprocess the batch.
+
+RPO/RTO targets to agree before launch: RPO ≤ 24h (nightly dump) or minutes
+(PITR); RTO ~1h including verification. Run a restore drill before go-live —
+an untested backup is not a backup.

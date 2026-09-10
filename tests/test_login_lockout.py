@@ -59,7 +59,10 @@ class TestLogin:
             "/api/v1/auth/login", json={"email": MA_EMAIL, "password": WRONG}
         )
         assert ghost.status_code == known_bad.status_code == 401
-        assert ghost.json()["error"] == known_bad.json()["error"]
+        # Anti-enumeration: code + message must be identical. request_id differs
+        # per request by design and is not part of the indistinguishability claim.
+        for key in ("code", "message"):
+            assert ghost.json()["error"][key] == known_bad.json()["error"][key]
 
     async def test_malformed_body_rejected(self, client, ma_user_id):
         r = await client.post("/api/v1/auth/login", json={"email": "not-an-email"})
@@ -76,12 +79,20 @@ class TestLockout:
             )
             assert r.status_code == 401
 
-        # Correct password now rejected because account is locked (423)
-        ok_but_locked = await client.post(
+        # v3 behavior (Strix vuln-0001): the CORRECT password still works while
+        # locked — the account owner can never be denied service. A locked
+        # account answering a wrong password is indistinguishable from any bad
+        # password (uniform 401), so lockout state is not an enumeration oracle.
+        wrong_while_locked = await client.post(
+            "/api/v1/auth/login", json={"email": MA_EMAIL, "password": WRONG}
+        )
+        assert wrong_while_locked.status_code == 401
+        assert wrong_while_locked.json()["error"]["code"] == "invalid_credentials"
+
+        ok_despite_lock = await client.post(
             "/api/v1/auth/login", json={"email": MA_EMAIL, "password": MA_PASSWORD}
         )
-        assert ok_but_locked.status_code == 423
-        assert ok_but_locked.json()["error"]["code"] == "account_locked"
+        assert ok_despite_lock.status_code == 200
 
         # Simulate lock expiry
         async with test_session() as db:
@@ -106,6 +117,25 @@ class TestLockout:
             ).scalar_one()
             assert user.failed_login_attempts == 0
             assert user.locked_until is None
+
+    async def test_successful_login_during_lockout_clears_lock_and_counter(self, client, ma_user_id):
+        """Regression: correct password during an active lock must FULLY clear
+        lockout state (not just bypass it for that one request)."""
+        await _lock_user_now(ma_user_id)
+
+        async with test_session() as db:
+            user = (await db.execute(select(User).where(User.id == ma_user_id))).scalar_one()
+            assert user.locked_until is not None and user.failed_login_attempts == 5
+
+        ok = await client.post(
+            "/api/v1/auth/login", json={"email": MA_EMAIL, "password": MA_PASSWORD}
+        )
+        assert ok.status_code == 200
+
+        async with test_session() as db:
+            user = (await db.execute(select(User).where(User.id == ma_user_id))).scalar_one()
+            assert user.locked_until is None
+            assert user.failed_login_attempts == 0
 
     async def test_lockout_window_resets_on_success(self, client, ma_user_id):
         for i in range(3):

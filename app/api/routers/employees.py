@@ -30,6 +30,10 @@ def _serialize(emp) -> dict:
         "personal_email": v.personal_email if v else None,
         "department": v.department if v else None,
         "updated_at": emp.updated_at.isoformat() if emp.updated_at else None,
+        # OCR review state — powers the review-flag UI (locked requirement 3a)
+        "needs_review": bool(emp.needs_review),
+        "review_note": emp.review_note,
+        "ocr_confidence": float(emp.ocr_confidence) if emp.ocr_confidence is not None else None,
     }
 
 
@@ -63,6 +67,31 @@ async def correct_employee(
             exc.status_code, detail={"code": exc.code, "message": exc.message}
         ) from exc
     return version.public_dict()
+
+
+@router.get("/{employee_id}/detail")
+async def employee_detail(employee_id: uuid.UUID, actor: RepoViewer, db: DB):
+    try:
+        employee, versions, batches = await employee_service.get_detail(
+            db, actor, employee_id
+        )
+    except employee_service.EmployeeRuleError as exc:
+        raise HTTPException(
+            exc.status_code, detail={"code": exc.code, "message": exc.message}
+        ) from exc
+    return {
+        **_serialize(employee),
+        "versions": [v.public_dict() for v in versions],
+        "gets_batches": [
+            {
+                "id": str(b.id),
+                "status": b.status.value,
+                "total_files": b.total_files,
+                "created_at": b.created_at.isoformat() if b.created_at else None,
+            }
+            for b in batches
+        ],
+    }
 
 
 @router.get("/{employee_id}/history")

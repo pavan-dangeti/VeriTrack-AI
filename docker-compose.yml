@@ -41,10 +41,16 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    # Bootstrap NEVER falls back to a default credential (Strix vuln-0003):
+    # compose refuses to start without an explicit SEED_ADMIN_PASSWORD.
     command: >
-      sh -c "alembic upgrade head &&
+      sh -c 'if [ -z "$$SEED_ADMIN_PASSWORD" ]; then
+               echo "SEED_ADMIN_PASSWORD must be set in .env before first boot" >&2;
+               exit 1;
+             fi &&
+             alembic upgrade head &&
              python -m app.cli create-master-admin --if-not-exists &&
-             uvicorn app.main:app --host 0.0.0.0 --port 8000"
+             uvicorn app.main:app --host 0.0.0.0 --port 8000'
 
   worker:
     build: .

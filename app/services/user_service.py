@@ -46,6 +46,7 @@ async def create_user(
     creator: User,
     email: str,
     role: UserRole,
+    full_name: str | None = None,
 ) -> tuple[User, str]:
     assert_can_create(creator, role)
 
@@ -57,6 +58,7 @@ async def create_user(
     initial_password = generate_initial_password()
     user = User(
         email=normalized_email,
+        full_name=(full_name or "").strip() or None,
         role=role,
         auth_type=AuthType.PASSWORD,
         password_hash=hash_password(initial_password),
@@ -97,6 +99,100 @@ def scoped_users_query(actor: User):
     if actor.role in (UserRole.MASTER_ADMIN, UserRole.EXECUTIVE):
         return select(User)
     return select(User).where(User.manager_id == actor.id)
+
+
+async def get_user_profile(
+    db: AsyncSession, *, actor: User, target_id: uuid.UUID
+) -> dict:
+    """Identity/context view for one user (the "Profile" drill-down).
+
+    Scoping: self always; MA/EXEC anyone; MANAGER only their own HR users;
+    HR nobody but self. Role-scoped extras ride along in the same payload.
+    """
+    target = await db.get(User, target_id)
+    if target is None:
+        raise UserRuleError(404, "not_found", "User not found")
+
+    if target.id != actor.id:
+        if actor.role in (UserRole.MASTER_ADMIN, UserRole.EXECUTIVE):
+            pass
+        elif actor.role is UserRole.MANAGER and (
+            target.role is UserRole.HR and target.manager_id == actor.id
+        ):
+            pass
+        else:
+            raise UserRuleError(403, "forbidden", "Not in your visible scope")
+
+    out = target.public_dict()
+    if target.role is UserRole.MANAGER:
+        from app.models.employees import Employee
+        from app.models.uploads import BatchKind, BatchStatus, UploadBatch
+
+        hrs = list(
+            (
+                await db.execute(
+                    select(User)
+                    .where(User.manager_id == target.id)
+                    .order_by(User.created_at.desc())
+                )
+            )
+            .scalars()
+        )
+        out["hr_accounts"] = [
+            {"id": str(h.id), "email": h.email, "full_name": h.full_name,
+             "is_active": h.is_active}
+            for h in hrs
+        ]
+        out["employee_count"] = int(
+            (
+                await db.execute(
+                    select(func.count())
+                    .select_from(Employee)
+                    .where(Employee.manager_id == target.id, Employee.is_deleted.is_(False))
+                )
+            ).scalar_one()
+        )
+        batches_base = select(UploadBatch).where(
+            UploadBatch.manager_id == target.id, UploadBatch.kind == BatchKind.GETS
+        )
+        out["gets_batches_total"] = int(
+            (await db.execute(select(func.count()).select_from(batches_base.subquery())))
+            .scalar_one()
+        )
+        out["gets_batches_completed"] = int(
+            (
+                await db.execute(
+                    select(func.count()).select_from(
+                        batches_base.where(
+                            UploadBatch.status == BatchStatus.COMPLETED
+                        ).subquery()
+                    )
+                )
+            ).scalar_one()
+        )
+        recent = (
+            await db.execute(
+                batches_base.order_by(UploadBatch.created_at.desc()).limit(5)
+            )
+        ).scalars()
+        out["gets_batches_recent"] = [
+            {
+                "id": str(b.id),
+                "status": b.status.value,
+                "total_files": b.total_files,
+                "failed_files": b.failed_files,
+                "created_at": b.created_at.isoformat() if b.created_at else None,
+            }
+            for b in recent
+        ]
+    elif target.role is UserRole.HR:
+        mgr = await db.get(User, target.manager_id) if target.manager_id else None
+        out["manager"] = (
+            {"id": str(mgr.id), "email": mgr.email, "full_name": mgr.full_name}
+            if mgr is not None
+            else None
+        )
+    return out
 
 
 async def list_users_scoped(

@@ -184,6 +184,50 @@ class TestPendingOcrFallback:
         )
         assert rp.status_code == 409
 
+    async def test_force_reprocess_done_re_extracts_without_duplicates(
+        self, client, ma_user_id, monkeypatch
+    ):
+        headers = await _make_manager(client)
+        csv = b"Employee ID,Full Name\nE-9,Xavier Yee\n"
+        r = await client.post(
+            "/api/v1/uploads?kind=EMPLOYEE_REPO",
+            files=[("files", ("f.csv", io.BytesIO(csv), "text/csv"))],
+            headers=headers,
+        )
+        batch_id = r.json()["id"]
+        detail = (await client.get(
+            f"/api/v1/uploads/batches/{batch_id}", headers=headers)).json()
+        file_id = detail["files"][0]["id"]
+        assert detail["files"][0]["rows_extracted"] == 1
+        assert detail["files"][0]["status"] == "DONE"
+
+        # Without force -> still rejected
+        rp = await client.post(
+            f"/api/v1/uploads/batches/{batch_id}/files/{file_id}/reprocess",
+            headers=headers,
+        )
+        assert rp.status_code == 409
+
+        # With force -> re-extracts, no duplicate rows
+        rp = await client.post(
+            f"/api/v1/uploads/batches/{batch_id}/files/{file_id}/reprocess",
+            headers=headers, params={"force": "true"},
+        )
+        assert rp.status_code == 200, rp.text
+        assert rp.json()["status"] == "DONE"
+        assert rp.json()["rows_extracted"] == 1  # not 2 (rows were cleared first)
+
+        from sqlalchemy import func, select
+
+        from app.models.uploads import ExtractedRow
+        from tests.conftest import test_session
+
+        async with test_session() as db:
+            count = await db.scalar(
+                select(func.count()).where(ExtractedRow.file_id == file_id)
+            )
+            assert count == 1
+
 
 class TestScannedUploadEndToEnd:
     """With the real engine present, an image upload flows through to rows."""

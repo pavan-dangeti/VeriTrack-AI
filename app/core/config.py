@@ -6,7 +6,7 @@ The app fails fast at startup if required settings are missing in production.
 
 from functools import lru_cache
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Self
 
 from pydantic import BeforeValidator, Field, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
@@ -56,7 +56,10 @@ class Settings(BaseSettings):
     m365_redirect_uri: str = "http://localhost:8000/api/v1/auth/m365/callback"
 
     seed_admin_email: str = "admin@veritrack.io"
-    seed_admin_password: str = "Bootstrap!Pass123"  # noqa: S105 - local bootstrap default; override via env
+    # No default: the bootstrap credential must be supplied explicitly
+    # (SEED_ADMIN_PASSWORD or `create-master-admin --password`), otherwise the
+    # CLI generates a strong random password and prints it exactly once.
+    seed_admin_password: str | None = None
 
     # ---- Storage (Prompt #2) ----
     # local | s3 (S3-compatible: AWS S3, MinIO; Azure Blob adapter slots in
@@ -76,6 +79,10 @@ class Settings(BaseSettings):
     # ---- Queue / workers ----
     celery_broker_url: str = "redis://localhost:6379/0"
     celery_result_backend: str = "redis://localhost:6379/1"
+
+    # Retention policy: GETS batches + reports older than this many days are
+    # purgeable by Master Admin (POST /settings/purge-obsolete-data).
+    retention_days: int = 365
     celery_task_always_eager: bool = False  # true => process inline (tests/demo)
 
     # ---- Extraction / AI ----
@@ -118,7 +125,7 @@ class Settings(BaseSettings):
         return self.is_production
 
     @model_validator(mode="after")
-    def validate_secrets(self) -> Settings:
+    def validate_secrets(self) -> Self:
         if self.is_production:
             if not self.jwt_secret_key or len(self.jwt_secret_key) < 32:
                 raise ValueError(

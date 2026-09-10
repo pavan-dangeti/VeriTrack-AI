@@ -15,6 +15,9 @@ class BatchOut(BaseModel):
     failed_files: int
     created_at: datetime
     completed_at: datetime | None
+    # Uploader attribution (name, email) — populated for cross-manager views.
+    manager_email: str | None = None
+    manager_name: str | None = None
 
 
 class FileStatusOut(BaseModel):
@@ -26,6 +29,7 @@ class FileStatusOut(BaseModel):
     status: str
     error_message: str | None
     rows_extracted: int | None
+    needs_review_count: int = 0
 
 
 class BatchDetailOut(BatchOut):

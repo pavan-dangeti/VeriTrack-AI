@@ -26,6 +26,14 @@ Viewer = Annotated[
     User,
     Depends(require_role(UserRole.MASTER_ADMIN, UserRole.EXECUTIVE, UserRole.MANAGER)),
 ]
+AnyUser = Annotated[
+    User,
+    Depends(
+        require_role(
+            UserRole.MASTER_ADMIN, UserRole.EXECUTIVE, UserRole.MANAGER, UserRole.HR
+        )
+    ),
+]
 MasterAdminOnly = Annotated[User, Depends(require_role(UserRole.MASTER_ADMIN))]
 
 
@@ -33,7 +41,8 @@ MasterAdminOnly = Annotated[User, Depends(require_role(UserRole.MASTER_ADMIN))]
 async def create_user(body: UserCreate, actor: Creator, db: DB):
     try:
         user, initial_password = await user_service.create_user(
-            db, creator=actor, email=body.email, role=body.role
+            db, creator=actor, email=body.email, role=body.role,
+            full_name=body.full_name,
         )
     except user_service.UserRuleError as exc:
         raise HTTPException(
@@ -48,6 +57,18 @@ async def create_user(body: UserCreate, actor: Creator, db: DB):
 async def list_users(actor: Viewer, db: DB):
     items, total = await user_service.list_users_scoped(db, actor)
     return UserListOut(items=[UserOut.model_validate(u) for u in items], total=total)
+
+
+@router.get("/{user_id}/profile")
+async def user_profile(user_id: uuid.UUID, actor: AnyUser, db: DB):
+    """Read-only profile view (drill-down). Scoping enforced in the service —
+    same rules as list visibility, plus self."""
+    try:
+        return await user_service.get_user_profile(db, actor=actor, target_id=user_id)
+    except user_service.UserRuleError as exc:
+        raise HTTPException(
+            exc.status_code, detail={"code": exc.code, "message": exc.message}
+        ) from exc
 
 
 @router.patch("/{user_id}/status", response_model=UserOut)

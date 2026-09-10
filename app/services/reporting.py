@@ -38,6 +38,18 @@ async def _run_rows(db: AsyncSession, run: AnalysisRun):
 # --- 3-tab Excel ---------------------------------------------------------------
 
 
+_FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r", "\x0b")
+
+
+def _escape_formula(value) -> str:
+    """Neutralize spreadsheet-formula injection in cells written to Excel."""
+    if not isinstance(value, str):
+        value = str(value)
+    if value.lstrip(" ")[:1] in _FORMULA_PREFIXES:
+        return "'" + value
+    return value
+
+
 def build_excel_3tab(run: AnalysisRun, violations, skips: list[dict]) -> bytes:
     from openpyxl import Workbook
     from openpyxl.styles import Font
@@ -52,7 +64,7 @@ def build_excel_3tab(run: AnalysisRun, violations, skips: list[dict]) -> bytes:
         for cell in ws[1]:
             cell.font = header_font
         for r in rows:
-            ws.append(r)
+            ws.append([_escape_formula(c) for c in r])
 
     sent = [
         [v.employee_code, v.employee_name or "", v.email_to or "",

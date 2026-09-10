@@ -30,4 +30,5 @@ python-multipart>=0.0.20
 
 # ---- OCR (Prompt 2.5) ----
 rapidocr-onnxruntime>=1.4
+pytesseract>=0.3.13  # cell-level digit reading; needs the tesseract binary
 pypdfium2>=4.30

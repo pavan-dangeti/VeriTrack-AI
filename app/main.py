@@ -12,7 +12,7 @@ from fastapi.responses import JSONResponse
 from slowapi.errors import RateLimitExceeded
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from app.api.routers import analysis, audit, auth, employees, health, uploads, users
+from app.api.routers import analysis, analytics, audit, auth, dashboard, employees, health, uploads, users
 from app.core.config import settings
 from app.core.logging import configure_logging, get_logger
 from app.core.rate_limit import limiter
@@ -22,17 +22,26 @@ log = get_logger("http")
 
 
 class RequestContextLogMiddleware(BaseHTTPMiddleware):
-    """Binds a request id to every log line; logs method/path/status/duration."""
+    """Binds a request id to every log line; logs method/path/status/duration.
+
+    Honors an inbound X-Request-ID from the frontend (sanity-checked); else
+    generates one. The id is echoed on the response and lands in every error
+    envelope, so a user-reported bug is greppable in the structlog stream.
+    """
 
     async def dispatch(self, request: Request, call_next):
-        request_id = uuid.uuid4().hex[:12]
+        incoming = request.headers.get("x-request-id", "")
+        request_id = (
+            incoming
+            if 8 <= len(incoming) <= 64 and incoming.replace("-", "").isalnum()
+            else uuid.uuid4().hex[:12]
+        )
         started = time.perf_counter()
-        try:
-            from structlog import contextvars as sctx
+        from structlog import contextvars as sctx
 
-            sctx.bind_contextvars(request_id=request_id)
-        except Exception:  # noqa: S110 — logging context is best-effort
-            pass
+        sctx.clear_contextvars()
+        sctx.bind_contextvars(request_id=request_id)
+        request.state.request_id = request_id
         response = await call_next(request)
         response.headers["X-Request-ID"] = request_id
         log.info(
@@ -49,6 +58,14 @@ def _error(code: str, message: str, extra: dict[str, Any] | None = None) -> dict
     err: dict[str, Any] = {"code": code, "message": message}
     if extra:
         err["details"] = extra
+    try:
+        from structlog import contextvars as sctx
+
+        rid = sctx.get_contextvars().get("request_id")
+        if rid:
+            err["request_id"] = rid
+    except Exception:  # noqa: S110 — context may be unset outside a request
+        pass
     return {"error": err}
 
 
@@ -94,6 +111,8 @@ def create_app() -> FastAPI:
     app.include_router(uploads.router, prefix="/api/v1")
     app.include_router(employees.router, prefix="/api/v1")
     app.include_router(analysis.router, prefix="/api/v1")
+    app.include_router(dashboard.router, prefix="/api/v1")
+    app.include_router(analytics.router, prefix="/api/v1")
 
     @app.exception_handler(RateLimitExceeded)
     async def rate_limited(_: Request, exc: RateLimitExceeded) -> JSONResponse:
@@ -103,14 +122,19 @@ def create_app() -> FastAPI:
             headers={"Retry-After": "60"},
         )
 
-    @app.exception_handler(HTTPException)
-    async def http_error(_: Request, exc: HTTPException) -> JSONResponse:
+    from starlette.exceptions import HTTPException as StarletteHTTPException
+
+    @app.exception_handler(StarletteHTTPException)
+    async def http_error(_: Request, exc: StarletteHTTPException) -> JSONResponse:
+        # Covers FastAPI HTTPException AND framework-level errors like the
+        # router's own 404 ("unmapped path") — one envelope for everything.
         detail = exc.detail
         if isinstance(detail, dict):
             code = detail.get("code", "http_error")
             message = detail.get("message", "Request failed")
         else:
-            code, message = "http_error", str(detail)
+            code = "http_error" if exc.status_code >= 500 else "not_found" if exc.status_code == 404 else "http_error"
+            message = str(detail)
         return JSONResponse(
             status_code=exc.status_code,
             content=_error(code, message),
@@ -126,6 +150,18 @@ def create_app() -> FastAPI:
                 "Request validation failed",
                 [{"loc": ".".join(str(p) for p in e.get("loc", [])), "msg": e.get("msg")}
                  for e in exc.errors()],
+            ),
+        )
+
+    @app.exception_handler(Exception)
+    async def unhandled(request: Request, exc: Exception) -> JSONResponse:
+        """Last-resort 500: never leak tracebacks — log them, return the id."""
+        log.error("unhandled_exception", path=request.url.path, exc_info=exc)
+        return JSONResponse(
+            status_code=500,
+            content=_error(
+                "internal_error",
+                "Something went wrong on our side. Reference the request ID when reporting.",
             ),
         )
 

@@ -3,11 +3,12 @@
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import Response
 from sqlalchemy import select
 
 from app.api.deps import DB, require_role
+from app.core.rate_limit import ANALYZE_LIMIT, EXPORT_LIMIT, user_limiter
 from app.models.analysis import AnalysisRun, GeneratedReport, ReportKind, ViolationResult
 from app.models.uploads import UploadBatch
 from app.models.user import User, UserRole
@@ -21,7 +22,7 @@ router = APIRouter(tags=["analysis"])
 
 RunViewer = Annotated[
     User,
-    Depends(require_role(UserRole.MASTER_ADMIN, UserRole.EXECUTIVE, UserRole.MANAGER)),
+    Depends(require_role(UserRole.MASTER_ADMIN, UserRole.EXECUTIVE, UserRole.MANAGER, UserRole.HR)),
 ]
 AnalyzeTrigger = Annotated[User, Depends(require_role(UserRole.MANAGER))]
 
@@ -45,7 +46,8 @@ async def _get_run_scoped(db, actor: User, batch_id: uuid.UUID) -> AnalysisRun:
 
 
 @router.post("/batches/{batch_id}/analyze", status_code=202)
-async def trigger_analyze(batch_id: uuid.UUID, actor: AnalyzeTrigger, db: DB):
+@user_limiter.limit(ANALYZE_LIMIT)
+async def trigger_analyze(request: Request, batch_id: uuid.UUID, actor: AnalyzeTrigger, db: DB):
     """Runs violation analysis on a completed GETS batch (Manager, own batch)."""
     batch = await db.get(UploadBatch, batch_id)
     if batch is None:
@@ -105,16 +107,33 @@ async def get_analysis(batch_id: uuid.UUID, actor: RunViewer, db: DB):
     )
 
 
-@router.post("/batches/{batch_id}/export")
-async def export_batch(batch_id: uuid.UUID, body: ExportRequest, actor: RunViewer, db: DB):
-    """Pure reformatting of processed rows — no violation logic involved."""
+@router.api_route("/batches/{batch_id}/export", methods=["GET", "POST"])
+async def export_batch(
+    batch_id: uuid.UUID,
+    actor: RunViewer,
+    db: DB,
+    request: Request,
+    format: str = Query(default="xlsx", pattern="^(csv|xlsx|pdf|png)$"),
+    columns: str | None = Query(default=None),
+):
+    """Pure reformatting of processed rows — no violation logic involved.
+
+    GET (query params) is what the frontend download helper uses; POST with a
+    JSON ExportRequest body is kept for API clients."""
     batch = await db.get(UploadBatch, batch_id)
     if batch is None:
         raise HTTPException(404, detail={"code": "not_found", "message": "Batch not found"})
     if actor.role is UserRole.HR:
-        raise HTTPException(403, detail={"code": "forbidden", "message": "HR has no export access"})
-    if actor.role is UserRole.MANAGER and batch.manager_id != actor.id:
+        if actor.manager_id is None or batch.manager_id != actor.manager_id:
+            raise HTTPException(403, detail={"code": "forbidden", "message": "Not your manager's batch"})
+    elif actor.role is UserRole.MANAGER and batch.manager_id != actor.id:
         raise HTTPException(403, detail={"code": "forbidden", "message": "Not your batch"})
+
+    if request.method == "POST":
+        body = ExportRequest.model_validate(await request.json())
+        fmt, cols = body.format, body.columns
+    else:
+        fmt, cols = format, columns.split(",") if columns else None
 
     from app.models.uploads import ExtractedRow
 
@@ -129,12 +148,30 @@ async def export_batch(batch_id: uuid.UUID, body: ExportRequest, actor: RunViewe
     raw_rows = (await db.execute(stmt)).scalars().all()
     rows = [dict(r) for r in raw_rows]
 
-    columns = body.columns or [
-        "employee_code", "full_name", "official_email",
-        "personal_email", "department",
-    ]
-    content_type, filename, exporter = EXPORTERS[body.format]
-    data = exporter(rows, columns)
+    if cols:
+        columns_out = cols
+    elif batch.kind.value == "GETS":
+        # Timesheets: fixed left columns, then day columns (sorted by day
+        # number), then total. Anything else observed trails on.
+        extras_keys: set[str] = set()
+        for r in rows:
+            extras_keys.update((r.get("extra") or {}).keys())
+        # A timesheet grid is positional: always emit all 31 day columns even
+        # when empty — a missing column is indistinguishable from zero hours.
+        day_cols = [f"day_{d:02d}" for d in range(1, 32)]
+        tail = sorted(extras_keys - set(day_cols) - {"hour_type", "project_id",
+                     "project_name", "task_id", "remarks", "total"})
+        columns_out = [
+            "employee_code", "full_name", "hour_type", "project_id",
+            "project_name", "task_id", "remarks",
+        ] + day_cols + (["total"] if "total" in extras_keys else []) + tail
+    else:
+        columns_out = [
+            "employee_code", "full_name", "official_email",
+            "personal_email", "department",
+        ]
+    content_type, filename, exporter = EXPORTERS[fmt]
+    data = exporter(rows, columns_out)
 
     await audit_service.record(
         db,
@@ -143,7 +180,7 @@ async def export_batch(batch_id: uuid.UUID, body: ExportRequest, actor: RunViewe
         actor_user_id=actor.id,
         target_entity="batch",
         target_id=str(batch_id),
-        metadata={"format": body.format, "rows": len(rows)},
+        metadata={"format": fmt, "rows": len(rows)},
     )
     return Response(
         content=data,
@@ -159,7 +196,8 @@ def UploadedFile_in_batch(batch_id: uuid.UUID):
 
 
 @router.get("/runs/{run_id}/reports/{kind}")
-async def download_report(run_id: uuid.UUID, kind: str, actor: RunViewer, db: DB):
+@user_limiter.limit(EXPORT_LIMIT)
+async def download_report(request: Request, run_id: uuid.UUID, kind: str, actor: RunViewer, db: DB):
     """Summary PDF / 3-tab Excel downloads — Manager own, MA/EXEC all."""
     if kind not in ("summary.pdf", "3tab.xlsx"):
         raise HTTPException(404, detail={"code": "not_found", "message": "Unknown report kind"})
@@ -175,6 +213,8 @@ async def download_report(run_id: uuid.UUID, kind: str, actor: RunViewer, db: DB
         raise HTTPException(404, detail={"code": "not_found", "message": "Report not generated"})
 
     run = await db.get(AnalysisRun, run_id)
+    if actor.role is UserRole.HR:
+        raise HTTPException(403, detail={"code": "forbidden", "message": "HR has no report access"})
     if actor.role is UserRole.MANAGER and run.manager_id != actor.id:
         raise HTTPException(403, detail={"code": "forbidden", "message": "Not your report"})
 
@@ -189,3 +229,31 @@ async def download_report(run_id: uuid.UUID, kind: str, actor: RunViewer, db: DB
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
     return Response(content=data, media_type=media)
+
+
+@router.post("/runs/{run_id}/resend")
+async def resend_reports(run_id: uuid.UUID, actor: RunViewer, db: DB):
+    """Re-delivers summary PDF + 3-tab Excel to the uploading manager.
+
+    MA/EXEC may trigger for visibility mirroring; dry-run mode records intent."""
+    run = await db.get(AnalysisRun, run_id)
+    if run is None:
+        raise HTTPException(404, detail={"code": "not_found", "message": "Run not found"})
+    if actor.role is UserRole.HR:
+        raise HTTPException(403, detail={"code": "forbidden", "message": "HR has no report access"})
+    if actor.role is UserRole.MANAGER and run.manager_id != actor.id:
+        raise HTTPException(403, detail={"code": "forbidden", "message": "Not your report"})
+
+    from app.services.reporting import generate_and_store_reports
+
+    keys = await generate_and_store_reports(db, run)
+    await audit_service.record(
+        db,
+        action="RESEND_REPORTS",
+        result=audit_service.AuditResult.SUCCESS,
+        actor_user_id=actor.id,
+        target_entity="analysis_run",
+        target_id=str(run.id),
+        metadata={"attachments": sorted(keys.values())},
+    )
+    return {"resent": True, "attachments": sorted(keys.values())}

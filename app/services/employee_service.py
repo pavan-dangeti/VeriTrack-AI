@@ -67,7 +67,9 @@ async def upsert_from_extracted_rows(
     manager_id,
     rows_by_code: dict[str, dict],  # code -> best normalized values
     actor_id=None,
+    review_by_code: dict[str, dict] | None = None,  # code -> {needs_review, note, confidence}
 ) -> tuple[int, int]:
+    review_by_code = review_by_code or {}
     """Bulk import from an EMPLOYEE_REPO batch. Re-upload updates in place by
     inserting new versions — history is never lost."""
     created = updated = 0
@@ -86,8 +88,15 @@ async def upsert_from_extracted_rows(
             Employee.is_deleted.is_(False),
         )
         employee = (await db.execute(stmt)).scalar_one_or_none()
+        review = review_by_code.get(code.lower(), {})
         if employee is None:
-            employee = Employee(manager_id=manager_id, employee_code=code)
+            employee = Employee(
+                manager_id=manager_id,
+                employee_code=code,
+                needs_review=bool(review.get("needs_review")),
+                review_note=review.get("note"),
+                ocr_confidence=review.get("confidence"),
+            )
             db.add(employee)
             await db.flush()
             await _insert_version(
@@ -96,9 +105,9 @@ async def upsert_from_extracted_rows(
             created += 1
         else:
             current = await db.get(EmployeeVersion, employee.current_version_id)
-            changed = current and any(
+            changed = current is not None and any(
                 (getattr(current, f) or None) != (values.get(f) or None)
-                for f in ("full_name", "official_email", "personal_email", "department")
+                for f in EDITABLE_FIELDS
             )
             if changed:
                 await _insert_version(
@@ -110,6 +119,10 @@ async def upsert_from_extracted_rows(
                     note="re-upload changed fields",
                 )
                 updated += 1
+            # Even unchanged rows can newly carry a review flag from a re-scan.
+            employee.needs_review = bool(review.get("needs_review"))
+            employee.review_note = review.get("note")
+            employee.ocr_confidence = review.get("confidence")
     await db.commit()
     return created, updated
 
@@ -165,6 +178,9 @@ async def apply_correction(
         source="CORRECTION",
         note=note or f"inline edit: {sorted(field_updates)}",
     )
+    # A human has spoken — clear the OCR review flag.
+    employee.needs_review = False
+    employee.review_note = None
     await db.commit()
 
     await audit_service.record(
@@ -201,16 +217,45 @@ async def list_scoped(db: AsyncSession, actor: User) -> list[Employee]:
     return list((await db.execute(base)).scalars())
 
 
-async def get_history(db: AsyncSession, actor: User, employee_id) -> list[EmployeeVersion]:
+async def _get_visible_employee_or_raise(db: AsyncSession, actor: User, employee_id):
     employee = await db.get(Employee, employee_id)
-    if employee is None:
+    if employee is None or employee.is_deleted:
         raise EmployeeRuleError(404, "not_found", "Employee not found")
     visible_ids = {e.id for e in await list_scoped(db, actor)}
     if employee.id not in visible_ids:
         raise EmployeeRuleError(403, "forbidden", "Not in your visible scope")
+    return employee
+
+
+async def get_history(db: AsyncSession, actor: User, employee_id) -> list[EmployeeVersion]:
+    employee = await _get_visible_employee_or_raise(db, actor, employee_id)
     stmt = (
         select(EmployeeVersion)
         .where(EmployeeVersion.employee_id == employee.id)
         .order_by(EmployeeVersion.version_no.desc())
     )
     return list((await db.execute(stmt)).scalars())
+
+
+async def get_detail(db: AsyncSession, actor: User, employee_id):
+    """Full record + version history + GETS batches this code appeared in."""
+    from app.models.uploads import BatchKind, ExtractedRow, UploadBatch, UploadedFile
+
+    employee = await _get_visible_employee_or_raise(db, actor, employee_id)
+    versions = await get_history(db, actor, employee_id)
+    batches = (
+        await db.execute(
+            select(UploadBatch)
+            .join(UploadedFile, UploadedFile.batch_id == UploadBatch.id)
+            .join(ExtractedRow, ExtractedRow.file_id == UploadedFile.id)
+            .where(
+                UploadBatch.kind == BatchKind.GETS,
+                UploadBatch.manager_id == employee.manager_id,
+                ExtractedRow.data["employee_code"].astext == employee.employee_code,
+            )
+            .distinct()
+            .order_by(UploadBatch.created_at.desc())
+            .limit(20)
+        )
+    ).scalars()
+    return employee, versions, list(batches)

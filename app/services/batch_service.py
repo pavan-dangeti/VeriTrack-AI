@@ -201,6 +201,7 @@ async def _populate_employee_repository(db: AsyncSession, batch: UploadBatch) ->
     rows = (await db.execute(stmt)).scalars().unique().all()
 
     best_by_code: dict[str, dict] = {}
+    review_by_code: dict[str, dict] = {}
     for row in rows:
         values = dict(row.data or {})
         code = str(values.get("employee_code") or "").strip()
@@ -212,12 +213,18 @@ async def _populate_employee_repository(db: AsyncSession, batch: UploadBatch) ->
         best_by_code.setdefault(code, values).update(
             {k: v for k, v in values.items() if v}
         )
+        review_by_code[code.lower()] = {
+            "needs_review": row.needs_review,
+            "note": row.review_note,
+            "confidence": row.confidence,
+        }
 
     created, updated = await upsert_from_extracted_rows(
         db,
         manager_id=batch.manager_id,
         rows_by_code=best_by_code,  # original casing preserved
         actor_id=batch.manager_id,
+        review_by_code=review_by_code,
     )
     log.info("repository_populated", batch_id=str(batch.id),
              created=created, updated=updated)
@@ -242,3 +249,64 @@ def _max_file_mb() -> int:
     from app.core.config import settings
 
     return settings.max_file_size_mb
+
+
+async def purge_obsolete_batches(
+    db: AsyncSession, *, actor: User, retention_days: int
+) -> dict:
+    """Hard-purge GETS/repo batches (and their files/reports) older than the
+    retention window. Employees are NEVER touched — their records are
+    soft-delete/versioned and kept. Storage blobs best-effort: a blob failure
+    must not roll back the DB purge."""
+    from datetime import timedelta
+
+    from sqlalchemy import select as sa_select
+
+    from app.models.analysis import AnalysisRun, GeneratedReport
+    from app.services.storage import get_storage
+
+    cutoff = datetime.now(UTC) - timedelta(days=retention_days)
+
+    old = (
+        await db.execute(
+            sa_select(UploadBatch).where(UploadBatch.created_at < cutoff)
+        )
+    ).scalars()
+    ids = [b.id for b in old]
+    storage = get_storage()
+
+    file_keys = []
+    for b in old:
+        for f in b.files:
+            file_keys.append(f.storage_key)
+    report_keys = list(
+        (
+            await db.execute(
+                sa_select(GeneratedReport.storage_key)
+                .join(AnalysisRun, AnalysisRun.id == GeneratedReport.run_id)
+                .where(AnalysisRun.batch_id.in_(ids or [uuid.uuid4()]))
+            )
+        ).scalars()
+    )
+
+    for key in file_keys + report_keys:
+        try:
+            storage.delete(key)
+        except Exception as exc:  # noqa: BLE001 — blob cleanup is best-effort
+            log.warning("purge_blob_failed", key=key, error=str(exc))
+
+    from sqlalchemy import delete as sa_delete
+
+    await db.execute(sa_delete(UploadBatch).where(UploadBatch.id.in_(ids or [uuid.uuid4()])))
+    await db.commit()
+
+    await audit_service.record(
+        db,
+        action="PURGE_OBSOLETE_DATA",
+        result=audit_service.AuditResult.SUCCESS,
+        actor_user_id=actor.id,
+        target_entity="upload_batch",
+        target_id=None,
+        metadata={"purged_batches": len(ids), "retention_days": retention_days},
+    )
+    return {"purged_batches": len(ids), "retention_days": retention_days, "cutoff": cutoff}
