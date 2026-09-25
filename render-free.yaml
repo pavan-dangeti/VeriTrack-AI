@@ -1,0 +1,51 @@
+# Render Blueprint on the FREE plan: New → Blueprint → this repo, Blueprint Path = render-free.yaml
+# Limits: the API sleeps after 15 min idle (first request wakes it in ~1 min), 512 MB RAM /
+# 0.1 CPU (OCR takes ~1 min per sheet), uploaded files are lost on restart (no disk),
+# and the free database expires after 30 days. Use render.yaml for production.
+services:
+  - type: web
+    name: veritrack-api
+    runtime: docker
+    plan: free
+    region: singapore
+    healthCheckPath: /health/ready
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: veritrack-db
+          property: connectionString
+      - key: JWT_SECRET_KEY
+        generateValue: true
+      - key: TRUSTED_PROXY_HOPS
+        value: "2"
+      - key: PROCESSING_MODE
+        value: background
+      - key: OCR_CONCURRENCY
+        value: "1"
+      - key: WEB_CONCURRENCY
+        value: "1"
+      - key: DB_POOL_SIZE
+        value: "3"
+      - key: DB_MAX_OVERFLOW
+        value: "2"
+      - key: STORAGE_BACKEND
+        value: volume
+      - key: LOCAL_STORAGE_ROOT
+        value: /srv/storage-data
+      - key: CORS_ORIGINS
+        sync: false
+      - key: SEED_ADMIN_EMAIL
+        sync: false
+      - key: SEED_ADMIN_PASSWORD
+        sync: false
+      - key: OUTBOUND_EMAIL_MODE
+        value: dry_run
+
+databases:
+  - name: veritrack-db
+    plan: free
+    region: singapore
+    databaseName: veritrack
+    user: veritrack
