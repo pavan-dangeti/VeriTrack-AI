@@ -39,6 +39,11 @@ browser ──► https://<app>.vercel.app  ──(/api/* rewrite)──► http
 > `OCR_CONCURRENCY=1`; on **Pro** (2 CPU, 4 GB) set `OCR_CONCURRENCY=2`.
 > Starter (512 MB) leaves no headroom and is not recommended.
 >
+> **Free plan (demo only).** In the Blueprint form set *Blueprint Path* to
+> `render-free.yaml`. No card is needed, but the API sleeps after 15 minutes idle,
+> has 0.1 CPU (about a minute of OCR per sheet), loses uploaded files on restart,
+> and the free database expires after 30 days.
+>
 > **No persistent disk?** Set `STORAGE_BACKEND=s3` with any S3-compatible bucket
 > (`S3_BUCKET`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`, `S3_ENDPOINT_URL` for R2/MinIO)
 > and remove the `disk:` block.
