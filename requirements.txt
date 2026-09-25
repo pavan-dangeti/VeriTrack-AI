@@ -1,0 +1,35 @@
+# ---- API ----
+fastapi>=0.118
+uvicorn[standard]>=0.37
+sqlalchemy[asyncio]>=2.0.43
+asyncpg>=0.30.0
+alembic>=1.16
+pydantic>=2.12
+email-validator>=2.2
+pydantic-settings>=2.10
+bcrypt>=5.0
+PyJWT[crypto]>=2.10
+httpx>=0.28
+structlog>=25.4
+slowapi>=0.1.9
+python-multipart>=0.0.20
+
+# ---- jobs (PROCESSING_MODE=celery only) ----
+celery[redis]>=5.5
+redis>=5.2
+
+# ---- documents ----
+openpyxl>=3.1
+xlrd>=2.0
+reportlab>=4.4
+pillow>=11.0
+pypdf>=5.9
+pypdfium2>=4.30
+filetype>=1.2
+boto3>=1.35  # STORAGE_BACKEND=s3
+
+# ---- OCR: PP-OCRv4 models on onnxruntime (CPU) + OpenCV geometry ----
+rapidocr-onnxruntime>=1.4
+opencv-python-headless>=4.10
+numpy>=1.26
+pytesseract>=0.3.13  # optional second opinion for digits; needs the tesseract binary

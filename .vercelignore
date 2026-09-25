@@ -1,0 +1,18 @@
+# Vercel hosts only the React frontend; the API runs on Render (render.yaml).
+app
+alembic
+alembic.ini
+tests
+test-data
+scripts
+docker
+docs
+requirements*.txt
+pyproject.toml
+Dockerfile
+docker-compose.yml
+render.yaml
+.venv
+frontend/node_modules
+frontend/dist
+private-data

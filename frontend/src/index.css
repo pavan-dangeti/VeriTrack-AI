@@ -1,0 +1,209 @@
+@import "tailwindcss";
+
+/* Dark mode is class-driven (html.dark), toggled from the top bar and
+   persisted per browser; the default follows the OS preference. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/*
+ * VeriTrack AI design tokens.
+ * Components reference ROLES (primary, surface, canvas, success, warning…),
+ * never raw hex. Every role is a CSS variable so light and dark themes are
+ * one swap of values below. The `warning` role powers all review flags.
+ */
+@theme inline {
+  --color-primary-50: var(--vt-primary-50);
+  --color-primary-100: var(--vt-primary-100);
+  --color-primary-200: var(--vt-primary-200);
+  --color-primary-500: var(--vt-primary-500);
+  --color-primary-600: var(--vt-primary-600);
+  --color-primary-700: var(--vt-primary-700);
+  --color-primary-900: var(--vt-primary-900);
+
+  --color-surface: var(--vt-surface);
+  --color-surface-2: var(--vt-surface-2);
+  --color-canvas: var(--vt-canvas);
+  --color-line: var(--vt-line);
+  --color-ink: var(--vt-ink);
+  --color-ink-2: var(--vt-ink-2);
+  --color-ink-3: var(--vt-ink-3);
+
+  --color-sidebar: var(--vt-sidebar);
+  --color-sidebar-hover: var(--vt-sidebar-hover);
+  --color-sidebar-text: var(--vt-sidebar-text);
+
+  --color-success-100: var(--vt-success-100);
+  --color-success-500: var(--vt-success-500);
+  --color-success-700: var(--vt-success-700);
+  --color-warning-100: var(--vt-warning-100);
+  --color-warning-200: var(--vt-warning-200);
+  --color-warning-500: var(--vt-warning-500);
+  --color-warning-700: var(--vt-warning-700);
+  --color-danger-100: var(--vt-danger-100);
+  --color-danger-500: var(--vt-danger-500);
+  --color-danger-700: var(--vt-danger-700);
+
+  /* GETS cell legend — mirrors the GETS web app so reviewers recognise it */
+  --color-gets-signed: #c2367a;
+  --color-gets-pm: #fff6c9;
+  --color-gets-lm: #e4e4e7;
+  --color-gets-planned: #5b78c7;
+
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --shadow-card: 0 1px 2px 0 rgb(16 24 40 / 0.04), 0 1px 3px 0 rgb(16 24 40 / 0.06);
+  --shadow-pop: 0 12px 32px -8px rgb(16 24 40 / 0.24), 0 4px 8px -4px rgb(16 24 40 / 0.1);
+  --shadow-glow: 0 0 0 4px var(--vt-primary-100);
+
+  --animate-toast-in: toast-in 0.18s ease-out both;
+  --animate-fade-up: fade-up 0.22s ease-out both;
+  --animate-shimmer: shimmer 1.4s linear infinite;
+
+  @keyframes toast-in {
+    from { opacity: 0; transform: translateY(-6px) scale(0.98); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+  }
+  @keyframes fade-up {
+    from { opacity: 0; transform: translateY(4px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes shimmer {
+    from { background-position: -400px 0; }
+    to { background-position: 400px 0; }
+  }
+}
+
+:root {
+  --vt-primary-50: #eef2ff;
+  --vt-primary-100: #e0e7ff;
+  --vt-primary-200: #c7d2fe;
+  --vt-primary-500: #6366f1;
+  --vt-primary-600: #4f46e5;
+  --vt-primary-700: #4338ca;
+  --vt-primary-900: #1e1b4b;
+
+  --vt-surface: #ffffff;
+  --vt-surface-2: #f8fafc;
+  --vt-canvas: #f4f6fb;
+  --vt-line: #e5e7eb;
+  --vt-ink: #0f172a;
+  --vt-ink-2: #475569;
+  --vt-ink-3: #94a3b8;
+
+  --vt-sidebar: #0b1020;
+  --vt-sidebar-hover: #161d33;
+  --vt-sidebar-text: #a9b4cc;
+
+  --vt-success-100: #dcfce7;
+  --vt-success-500: #22c55e;
+  --vt-success-700: #15803d;
+  --vt-warning-100: #fef3c7;
+  --vt-warning-200: #fde68a;
+  --vt-warning-500: #f59e0b;
+  --vt-warning-700: #b45309;
+  --vt-danger-100: #fee2e2;
+  --vt-danger-500: #ef4444;
+  --vt-danger-700: #b91c1c;
+  color-scheme: light;
+}
+
+.dark {
+  --vt-primary-50: #1e1b4b;
+  --vt-primary-100: #312e81;
+  --vt-primary-200: #3730a3;
+  --vt-primary-500: #818cf8;
+  --vt-primary-600: #6366f1;
+  --vt-primary-700: #a5b4fc;
+  --vt-primary-900: #e0e7ff;
+
+  --vt-surface: #111827;
+  --vt-surface-2: #0f1624;
+  --vt-canvas: #0a0f1a;
+  --vt-line: #1f2937;
+  --vt-ink: #f1f5f9;
+  --vt-ink-2: #cbd5e1;
+  --vt-ink-3: #64748b;
+
+  --vt-sidebar: #070b14;
+  --vt-sidebar-hover: #121a2c;
+  --vt-sidebar-text: #94a3b8;
+
+  --vt-success-100: #052e1a;
+  --vt-success-500: #22c55e;
+  --vt-success-700: #4ade80;
+  --vt-warning-100: #2d1d04;
+  --vt-warning-200: #3f2a07;
+  --vt-warning-500: #f59e0b;
+  --vt-warning-700: #fbbf24;
+  --vt-danger-100: #2d0a0a;
+  --vt-danger-500: #ef4444;
+  --vt-danger-700: #f87171;
+  color-scheme: dark;
+}
+
+@layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  body {
+    @apply bg-canvas text-ink;
+    font-feature-settings: "cv11", "ss01";
+  }
+  /* legacy grey utilities used across pages map onto theme roles */
+  .text-gray-900 { color: var(--vt-ink); }
+  .text-gray-800, .text-gray-700 { color: var(--vt-ink); }
+  .text-gray-600, .text-gray-500 { color: var(--vt-ink-2); }
+  .text-gray-400 { color: var(--vt-ink-3); }
+  .border-gray-100, .border-gray-200, .border-gray-300 { border-color: var(--vt-line); }
+  .bg-gray-100, .bg-gray-50 { background-color: var(--vt-surface-2); }
+  .bg-gray-200 { background-color: var(--vt-line); }
+  :focus-visible {
+    outline: 2px solid var(--vt-primary-500);
+    outline-offset: 2px;
+  }
+  ::selection { background: var(--vt-primary-200); }
+}
+
+/* Uniform look for every data table — pages opt in with class="data-table". */
+@layer components {
+  .data-table {
+    @apply w-full text-sm;
+  }
+  .data-table thead tr {
+    @apply border-b border-line bg-surface-2;
+  }
+  .data-table th {
+    @apply px-4 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wider text-ink-3;
+  }
+  .data-table td {
+    @apply px-4 py-3 text-ink-2;
+  }
+  .data-table tbody tr {
+    @apply border-b border-line transition-colors last:border-0;
+  }
+  .data-table tbody tr:hover {
+    @apply bg-primary-50/50;
+  }
+  .skeleton-bar {
+    background: linear-gradient(90deg, var(--vt-line) 0px, var(--vt-surface-2) 120px, var(--vt-line) 240px);
+    background-size: 800px 100%;
+    @apply animate-shimmer rounded-md;
+  }
+  .ag-theme-quartz, .ag-theme-quartz-dark {
+    --ag-font-family: var(--font-sans);
+    --ag-border-color: var(--vt-line);
+    --ag-background-color: var(--vt-surface);
+    --ag-header-background-color: var(--vt-surface-2);
+    --ag-foreground-color: var(--vt-ink);
+    --ag-odd-row-background-color: var(--vt-surface);
+    --ag-row-hover-color: var(--vt-primary-50);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

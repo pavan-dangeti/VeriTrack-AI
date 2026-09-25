@@ -1,0 +1,23 @@
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.env
+*.egg-info/
+htmlcov/
+.coverage
+
+# Runtime data & local tooling — never ship
+storage-data/
+# Real company timesheets used for private accuracy checks — never commit
+private-data/
+# generated on demand by scripts/gen_synthetic_gets.py
+test-data/synthetic/
+e2e/.artifacts/
+strix_runs/
+.serena/
+.gstack/
+.DS_Store
+frontend/node_modules/
+frontend/dist/

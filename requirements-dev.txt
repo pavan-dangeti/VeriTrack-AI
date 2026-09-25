@@ -1,0 +1,5 @@
+-r requirements.txt
+pytest>=8.4
+pytest-asyncio>=1.1
+ruff>=0.12
+playwright>=1.48  # synthetic GETS generator (scripts/gen_synthetic_gets.py)
