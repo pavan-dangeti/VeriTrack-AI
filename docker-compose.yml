@@ -1,0 +1,74 @@
+# Single-host stack: Postgres + API (+ the web UI behind nginx).
+#   docker compose up --build            → http://localhost:8080
+# Celery scale-out (optional): PROCESSING_MODE=celery docker compose --profile celery up
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: veritrack
+      POSTGRES_PASSWORD: veritrack
+      POSTGRES_DB: veritrack
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U veritrack"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  api:
+    build: .
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://veritrack:veritrack@db:5432/veritrack
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+      STORAGE_BACKEND: volume
+    volumes:
+      - storage:/srv/storage-data
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  web:
+    build: ./frontend
+    ports:
+      - "8080:80"
+    depends_on:
+      - api
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    profiles: ["celery"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  worker:
+    build: .
+    profiles: ["celery"]
+    command: ["worker"]
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://veritrack:veritrack@db:5432/veritrack
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+      STORAGE_BACKEND: volume
+    volumes:
+      - storage:/srv/storage-data
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+  storage:

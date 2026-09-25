@@ -1,0 +1,50 @@
+# Render Blueprint — API + Postgres. New → Blueprint → pick this repo.
+# After the first deploy, copy the service URL into vercel.json's rewrites.
+services:
+  - type: web
+    name: veritrack-api
+    runtime: docker
+    plan: standard           # 2 GB RAM; the API uses ~390 MB with one OCR engine
+    region: singapore
+    healthCheckPath: /health/ready
+    disk:
+      name: veritrack-storage
+      mountPath: /srv/storage-data
+      sizeGB: 5
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: veritrack-db
+          property: connectionString
+      - key: JWT_SECRET_KEY
+        generateValue: true
+      # browser → Vercel rewrite → Render load balancer → API
+      - key: TRUSTED_PROXY_HOPS
+        value: "2"
+      - key: PROCESSING_MODE
+        value: background
+      - key: OCR_CONCURRENCY    # ≈ CPU cores: 1 on Standard, 2 on Pro
+        value: "1"
+      - key: WEB_CONCURRENCY
+        value: "1"
+      - key: STORAGE_BACKEND
+        value: volume
+      - key: LOCAL_STORAGE_ROOT
+        value: /srv/storage-data
+      - key: CORS_ORIGINS
+        sync: false           # the Vercel frontend URL
+      - key: SEED_ADMIN_EMAIL
+        sync: false
+      - key: SEED_ADMIN_PASSWORD
+        sync: false
+      - key: OUTBOUND_EMAIL_MODE
+        value: dry_run
+
+databases:
+  - name: veritrack-db
+    plan: basic-256mb
+    region: singapore
+    databaseName: veritrack
+    user: veritrack
