@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Navigate, useLocation, useNavigate } from "react-router-dom";
 import { CalendarCheck2, Lock, ScanLine, ShieldCheck, Sparkles } from "lucide-react";
+import { ApiError, isWakingUp, warmUp } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { Button, Input } from "../components/ui/kit";
 
@@ -9,6 +10,9 @@ const FEATURES = [
   { icon: CalendarCheck2, title: "Leave compliance", text: "Out Of Office days matched to the company leave register." },
   { icon: Sparkles, title: "Reports that write themselves", text: "PDF + Excel summaries and automatic notifications." },
 ];
+
+const WAKE_TIMEOUT_MS = 90_000;
+const WAKE_RETRY_MS = 3_000;
 
 export function LoginPage() {
   const { login, user } = useAuth();
@@ -22,7 +26,10 @@ export function LoginPage() {
   const [fieldError, setFieldError] = useState<{ email?: string; password?: string }>({});
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [waking, setWaking] = useState(false);
   const from = (location.state as { from?: string } | null)?.from ?? "/dashboard";
+
+  useEffect(warmUp, []);
 
   if (user) return <Navigate to={from} replace />;
 
@@ -33,13 +40,27 @@ export function LoginPage() {
     if (!email.includes("@")) return setFieldError({ email: "Enter a valid email address" });
     if (password.length < 8) return setFieldError({ password: "Password must be at least 8 characters" });
     setBusy(true);
+    // A free-tier API sleeps when idle and answers 502/503 for up to a minute while it boots.
+    const deadline = Date.now() + WAKE_TIMEOUT_MS;
     try {
-      await login(email.trim(), password);
-      navigate(from, { replace: true });
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Login failed");
+      for (;;) {
+        try {
+          await login(email.trim(), password);
+          navigate(from, { replace: true });
+          return;
+        } catch (err) {
+          if (err instanceof ApiError && isWakingUp(err.status) && Date.now() < deadline) {
+            setWaking(true);
+            await new Promise((r) => setTimeout(r, WAKE_RETRY_MS));
+            continue;
+          }
+          setError(err instanceof Error && err.message ? err.message : "Sign in failed. Please try again.");
+          return;
+        }
+      }
     } finally {
       setBusy(false);
+      setWaking(false);
     }
   };
 
@@ -115,8 +136,13 @@ export function LoginPage() {
                 {error}
               </p>
             )}
+            {waking && (
+              <p className="text-center text-xs text-ink-3" role="status">
+                The server was idle and is starting up. This can take up to a minute.
+              </p>
+            )}
             <Button type="submit" size="lg" loading={busy} className="w-full" icon={Lock}>
-              {busy ? "Signing in…" : "Sign in"}
+              {waking ? "Waking up the server…" : busy ? "Signing in…" : "Sign in"}
             </Button>
           </form>
           <p className="mt-6 text-center text-xs text-ink-3">

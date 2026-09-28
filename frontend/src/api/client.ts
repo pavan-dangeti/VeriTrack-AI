@@ -39,6 +39,11 @@ export class ApiError extends Error {
   }
 }
 
+/** Fire-and-forget request that starts waking a sleeping API before the user submits. */
+export function warmUp(): void {
+  fetch(`${BASE.replace(/\/api\/v1$/, "")}/health`, { cache: "no-store" }).catch(() => undefined);
+}
+
 async function raw(path: string, init?: RequestInit): Promise<Response> {
   const headers: Record<string, string> = {
     ...(init?.headers as Record<string, string>),
@@ -69,12 +74,23 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
     const err = body?.error ?? {};
     throw new ApiError(
       resp.status,
-      err.code ?? "error",
-      err.message ?? resp.statusText,
+      err.code ?? (isWakingUp(resp.status) ? "server_unavailable" : "error"),
+      err.message || fallbackMessage(resp),
       resp.headers.get("x-request-id"),
     );
   }
   return body as T;
+}
+
+/** 502/503/504 from the proxy while the API is cold-starting or redeploying. */
+export function isWakingUp(status: number): boolean {
+  return status === 502 || status === 503 || status === 504;
+}
+
+// HTTP/2 responses carry no statusText, so a non-JSON error needs its own message.
+function fallbackMessage(resp: Response): string {
+  if (isWakingUp(resp.status)) return "The server is starting up. Please try again in a minute.";
+  return resp.statusText || `Request failed (${resp.status})`;
 }
 
 export function upload<T>(path: string, files: File[]): Promise<T> {
