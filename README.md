@@ -180,7 +180,7 @@ scales with CPU count and is a one-off per session (sessions refresh silently fo
 ```bash
 # backend
 python -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
-cp .env.example .env                        # set SEED_ADMIN_PASSWORD
+cp .env.example .env                        # set ADMIN_PASSWORD
 createdb veritrack                          # or: docker compose up -d db
 .venv/bin/alembic upgrade head
 .venv/bin/python -m app.cli create-master-admin
@@ -214,7 +214,7 @@ All settings are environment variables (see [`.env.example`](.env.example)); pro
 Frontend on **Vercel**, API + PostgreSQL on **Render** — step by step in [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 
 1. Render → **New → Blueprint** → this repository (`render.yaml` creates the API, the database and a disk).
-   Set `SEED_ADMIN_EMAIL`, `SEED_ADMIN_PASSWORD`, `CORS_ORIGINS`.
+   Set `ADMIN_EMAIL`, `ADMIN_PASSWORD`, `CORS_ORIGINS`.
 2. Put the Render URL into [`vercel.json`](vercel.json) (`rewrites`).
 3. Vercel → **Import** this repository (root directory = repository root).
 

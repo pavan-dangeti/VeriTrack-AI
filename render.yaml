@@ -35,9 +35,9 @@ services:
         value: /srv/storage-data
       - key: CORS_ORIGINS
         sync: false           # the Vercel frontend URL
-      - key: SEED_ADMIN_EMAIL
+      - key: ADMIN_EMAIL
         sync: false
-      - key: SEED_ADMIN_PASSWORD
+      - key: ADMIN_PASSWORD
         sync: false
       - key: OUTBOUND_EMAIL_MODE
         value: dry_run

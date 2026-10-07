@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Annotated, Self
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-from pydantic import BeforeValidator, Field, field_validator, model_validator
+from pydantic import AliasChoices, BeforeValidator, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
@@ -54,9 +54,11 @@ class Settings(BaseSettings):
     m365_tenant_id: str = "common"
     m365_redirect_uri: str = "http://localhost:8000/api/v1/auth/m365/callback"
 
-    seed_admin_email: str = "admin@veritrack.io"
-    # No default: without SEED_ADMIN_PASSWORD or --password the CLI generates one and prints it once.
-    seed_admin_password: str | None = None
+    # The Master Admin is synced from these at startup (SEED_ADMIN_* are the older names).
+    admin_email: str = Field(default="admin@veritrack.io",
+                             validation_alias=AliasChoices("ADMIN_EMAIL", "SEED_ADMIN_EMAIL"))
+    admin_password: str | None = Field(default=None,
+                                       validation_alias=AliasChoices("ADMIN_PASSWORD", "SEED_ADMIN_PASSWORD"))
 
     # local  — filesystem, development only
     # volume — filesystem on a persistent disk (allowed in production)

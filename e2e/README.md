@@ -30,7 +30,7 @@ export E2E_ADMIN_PASSWORD='…'          # the seeded Master Admin password
 | Variable | Default | Meaning |
 |---|---|---|
 | `E2E_BASE_URL` | `http://localhost:5173` | Frontend URL (API reached through its `/api` proxy) |
-| `E2E_ADMIN_EMAIL` / `E2E_ADMIN_PASSWORD` | `SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD` from the repo `.env` | Master Admin login |
+| `E2E_ADMIN_EMAIL` / `E2E_ADMIN_PASSWORD` | `ADMIN_EMAIL` / `ADMIN_PASSWORD` from the repo `.env` | Master Admin login |
 | `E2E_SHOTS_DIR` | `e2e/.artifacts` (git-ignored) | Screenshots (one per page per role) + every downloaded file |
 | `E2E_CHROMIUM` | Playwright's Chromium | Chromium executable |
 | `E2E_HEADED` | unset | set to `1` to watch the browser |

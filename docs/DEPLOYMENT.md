@@ -25,8 +25,8 @@ browser ──► https://<app>.vercel.app  ──(/api/* rewrite)──► http
 
    | Variable | Value |
    |---|---|
-   | `SEED_ADMIN_EMAIL` | the first administrator's email |
-   | `SEED_ADMIN_PASSWORD` | a strong password (change it after first login) |
+   | `ADMIN_EMAIL` | the Master Admin's email |
+   | `ADMIN_PASSWORD` | a strong password; to rotate it, change it here and redeploy (all admin sessions are signed out) |
    | `CORS_ORIGINS` | your Vercel URL, e.g. `https://veritrack.vercel.app` |
 
    `JWT_SECRET_KEY` is generated automatically.
