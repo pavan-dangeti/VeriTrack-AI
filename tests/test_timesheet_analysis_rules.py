@@ -38,8 +38,8 @@ def test_timesheet_rows_are_recognised():
 
 
 def test_timesheet_spreadsheet_export_normalises_by_header_names():
-    headers = ["Person ID", "Supplier", "Role", "UOM", "Project ID", "Sub Project",
-               "Sub Project ID", "Remarks", *[str(d) for d in range(1, 32)], "Total"]
+    headers = ["Employee ID", "Client", "Role", "Type", "Project Code", "Task",
+               "Task Code", "Notes", *[str(d) for d in range(1, 32)], "Total"]
     row = ["100001", "ACME", "Engineer", "NB", "600001", "Out Of Office", "2100001", "",
            *["8" if d in (17, 27) else "" for d in range(1, 32)], "16"]
     [n] = normalize_tables([RawTable(headers=headers, rows=[row])])
@@ -58,7 +58,7 @@ class TestTimesheetAnalysisEdges:
         cannot be dated, so they must not be reported as missing leave."""
         h = await manager(client, "ts.edge")
         await client.post("/api/v1/uploads?kind=EMPLOYEE_REPO", files=[csv_file("r.csv", REPO)], headers=h)
-        headers = ["Person ID", "UOM", "Sub Project", *[str(d) for d in range(1, 32)], "Total"]
+        headers = ["Employee ID", "Type", "Task", *[str(d) for d in range(1, 32)], "Total"]
         row = ["100001", "NB", "Out Of Office", *["8" if d == 17 else "" for d in range(1, 32)], "8"]
         text = ",".join(headers) + "\n" + ",".join(row) + "\n"
         batch = (await client.post("/api/v1/uploads?kind=TIMESHEET", files=[csv_file("g.csv", text)], headers=h)).json()

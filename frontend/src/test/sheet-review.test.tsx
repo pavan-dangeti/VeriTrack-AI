@@ -15,7 +15,7 @@ const cells = (hours: Record<number, number>, status = "SUBMITTED") =>
   }));
 
 const sheet = (verified: boolean) => ({
-  employee_name: "DEMO USER, K (K.)",
+  employee_name: "Kilo Demo User",
   person_id: "100001",
   supplier: "ACME",
   job_family: "Engineer - Senior",
@@ -26,10 +26,10 @@ const sheet = (verified: boolean) => ({
   weekdays: Array.from({ length: 31 }, (_, i) => ["We", "Th", "Fr", "Sa", "Su", "Mo", "Tu"][i % 7]),
   lines: [
     { row_index: 0, person_id: "100001", supplier: "ACME", job_family: "Eng", uom: "REG", project_id: "500001",
-      sub_project: "Alpha", sub_project_id: "2000001", remarks: "Remark", cells: cells({ 1: 8, 2: 8 }),
+      sub_project: "Alpha", sub_project_id: "2000001", remarks: "", cells: cells({ 1: 8, 2: 8 }),
       printed_total: 16, computed_total: 16, confidence: 0.99, issues: [], is_out_of_office: false },
     { row_index: 1, person_id: "100001", supplier: "ACME", job_family: "Eng", uom: "NB", project_id: "600001",
-      sub_project: "Out Of Office", sub_project_id: "2100001", remarks: "Remark", cells: cells({ 17: 8, 27: 8 }, "APPROVED"),
+      sub_project: "Out Of Office", sub_project_id: "2100001", remarks: "", cells: cells({ 17: 8, 27: 8 }, "APPROVED"),
       printed_total: 16, computed_total: 16, confidence: 0.99, issues: [], is_out_of_office: true },
   ],
   totals: { NB: Array(31).fill(0), REG: Array(31).fill(0), TOTAL: Array(31).fill(0) },
@@ -82,13 +82,13 @@ describe("SheetReviewPage", () => {
     state.verified = true;
     renderPage();
     expect(await screen.findByTestId("sheet-review-page")).toBeInTheDocument();
-    expect(screen.getByText("DEMO USER, K (K.)")).toBeInTheDocument();
+    expect(screen.getByText("Kilo Demo User")).toBeInTheDocument();
     expect(screen.getByText("July 2026")).toBeInTheDocument();
     const grid = screen.getByTestId("timesheet-grid");
     expect(within(grid).getByText("Alpha")).toBeInTheDocument();
     expect(within(grid).getByText("Leave")).toBeInTheDocument();
-    const signed = within(grid).getAllByText("8").filter((el) => el.className.includes("bg-status-signed"));
-    expect(signed).toHaveLength(2);
+    const submitted = within(grid).getAllByText("8").filter((el) => el.className.includes("bg-status-submitted"));
+    expect(submitted).toHaveLength(2);
     expect(within(grid).getAllByText("8").some((el) => el.className.includes("ring-primary-500"))).toBe(true); // corrected
   });
 

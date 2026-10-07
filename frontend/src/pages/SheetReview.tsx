@@ -17,18 +17,18 @@ import { Badge, Card, EmptyState, PageHeader, SectionTitle, Skeleton, StatusBadg
 import { fmtHours, fmtPeriod } from "../lib/format";
 
 const CELL_STYLE: Record<string, string> = {
-  SUBMITTED: "bg-status-signed text-white",
-  APPROVED: "bg-status-pm text-slate-900 ring-1 ring-inset ring-amber-300/70",
-  REVIEWED: "bg-status-lm text-slate-900",
-  PLANNED: "bg-status-planned text-white",
+  DRAFT: "bg-status-draft text-slate-900",
+  SUBMITTED: "bg-status-submitted text-slate-900",
+  APPROVED: "bg-status-approved text-white",
+  REJECTED: "bg-status-rejected text-white",
   FILLED: "bg-primary-100 text-primary-900",
 };
 
 const LEGEND = [
-  { key: "PLANNED", label: "Planned" },
-  { key: "SUBMITTED", label: "User signed" },
-  { key: "APPROVED", label: "PM approved" },
-  { key: "REVIEWED", label: "LM approved" },
+  { key: "DRAFT", label: "Draft" },
+  { key: "SUBMITTED", label: "Submitted" },
+  { key: "APPROVED", label: "Approved" },
+  { key: "REJECTED", label: "Rejected" },
 ];
 
 export function SheetReviewPage() {
@@ -241,8 +241,8 @@ function TimesheetGrid({ sheet }: { sheet: ParsedSheet }) {
       <table className="min-w-max border-separate border-spacing-0 text-xs">
         <thead className="sticky top-0 z-10 bg-surface-2">
           <tr>
-            <th className="sticky left-0 z-20 min-w-[220px] border-b border-line bg-surface-2 px-3 py-2 text-left font-semibold text-ink-2">Project</th>
-            <th className="border-b border-line px-2 py-2 font-semibold text-ink-2">UOM</th>
+            <th className="sticky left-0 z-20 min-w-[220px] border-b border-line bg-surface-2 px-3 py-2 text-left font-semibold text-ink-2">Task</th>
+            <th className="border-b border-line px-2 py-2 font-semibold text-ink-2">Type</th>
             {days.map((d, i) => (
               <th key={d} className={`w-9 border-b border-line px-0.5 py-1.5 text-center font-semibold ${weekend(i) ? "text-danger-700" : "text-ink-2"}`}>
                 <span className="block">{d}</span>

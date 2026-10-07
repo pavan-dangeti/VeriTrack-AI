@@ -43,10 +43,10 @@
   --color-danger-700: var(--vt-danger-700);
 
   /* cell status legend: the same colours the timesheet uses */
-  --color-status-signed: #DC2626;
-  --color-status-pm: #fff6c9;
-  --color-status-lm: #e4e4e7;
-  --color-status-planned: #64748B;
+  --color-status-draft: #e2e8f0;
+  --color-status-submitted: #f59e0b;
+  --color-status-approved: #16a34a;
+  --color-status-rejected: #dc2626;
 
   --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;

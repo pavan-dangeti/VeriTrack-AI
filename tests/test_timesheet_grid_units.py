@@ -28,8 +28,8 @@ def test_parse_number(text, expected):
 
 @pytest.mark.parametrize(
     ("rgb", "status"),
-    [((193, 54, 122), "SUBMITTED"), ((255, 249, 208), "APPROVED"),
-     ((228, 228, 228), "REVIEWED"), ((91, 120, 199), "PLANNED"), ((255, 255, 255), "EMPTY")],
+    [((220, 38, 38), "REJECTED"), ((245, 158, 11), "SUBMITTED"), ((22, 163, 74), "APPROVED"),
+     ((226, 232, 240), "DRAFT"), ((91, 120, 199), "FILLED"), ((255, 255, 255), "EMPTY")],
 )
 def test_cell_fill_classification(rgb, status):
     assert _classify_fill(rgb) == status
@@ -47,19 +47,19 @@ def test_glyphs_ignore_border_remnants_and_specks():
 
 
 def test_header_labels_parse_merged_ocr_text():
-    chars = [(c, float(i)) for i, c in enumerate("Person IDSupplierRole")]
+    chars = [(c, float(i)) for i, c in enumerate("Employee IDClientRole")]
     keys = [k for k, _, _ in _parse_labels(chars)]
     assert keys == ["person_id", "supplier", "job_family"]
 
 
 def test_header_labels_prefer_longest_match():
-    chars = [(c, float(i)) for i, c in enumerate("Sub Project ID")]
+    chars = [(c, float(i)) for i, c in enumerate("Task Code")]
     assert [k for k, _, _ in _parse_labels(chars)] == ["sub_project_id"]
 
 
 @pytest.mark.parametrize(
     ("raw", "clean"),
-    [("EXAMPLE,J(J.)", "EXAMPLE, J (J.)"), ("  DEMO USER ,K (K.) ", "DEMO USER, K (K.)")],
+    [("Example ,Juliet", "Example, Juliet"), ("  Demo   User. ", "Demo User")],
 )
 def test_clean_name(raw, clean):
     assert _clean_name(raw) == clean

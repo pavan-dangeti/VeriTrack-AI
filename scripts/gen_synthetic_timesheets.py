@@ -1,7 +1,7 @@
-"""Synthetic timesheet generator for the accuracy regression tests.
+"""Synthetic timesheet generator for the OCR accuracy tests.
 
-Renders an HTML replica of the Timesheet "Time Sheet" page with random invented data (months, fonts,
-zoom levels, every cell status), screenshots it with headless Chromium and writes the ground truth.
+Renders a monthly timesheet page with random invented data (months, fonts, zoom levels, every cell
+status), screenshots it with headless Chromium and writes the ground truth next to the images.
 
     python -m scripts.gen_synthetic_timesheets     # writes test-data/synthetic (git-ignored)
 """
@@ -14,20 +14,21 @@ import json
 import random
 from pathlib import Path
 
-# Every name, ID and project below is invented; no real person or project.
+# Every name, ID and project below is invented. List lengths are part of the seeded sequence:
+# changing them changes every generated sheet (and the fixtures that rely on their IDs and dates).
 SURNAMES = ["SAMPLE", "EXAMPLE", "TESTER", "DEMO USER", "PLACEHOLDER", "FICTION",
             "MOCKWELL", "DUMMY", "NOBODY", "ANONYMOUS", "FAKESON", "TRIAL", "SPECIMEN"]
-GIVEN = ["ALPHA", "BRAVO", "C", "D", "ECHO", "FOXTROT", "GOLF", "HOTEL",
+GIVEN = ["ALPHA", "BRAVO", "CHARLIE", "DELTA", "ECHO", "FOXTROT", "GOLF", "HOTEL",
          "INDIA", "JULIET", "KILO", "LIMA"]
 JOB_FAMILIES = ["Analyst", "Senior Analyst", "Engineer", "Lead Engineer"]
-SUB_PROJECTS = ["Alpha", "Billing API", "Data Pipeline", "Release_24", "Search_v2", "Payments",
-                "Mobile App", "Delta", "QA", "Infra_Core", "Analytics", "Docs_Hub",
+SUB_PROJECTS = ["Onboarding", "Billing API", "Data Pipeline", "Release_24", "Search_v2", "Payments",
+                "Mobile App", "Design System", "QA", "Infra_Core", "Analytics", "Docs_Hub",
                 "Support", "Migration"]
-STATUS_STYLE = {
-    "SUBMITTED": ("#DC2626", "#ffffff", "#DC2626"),
-    "APPROVED": ("#FEF3C7", "#212529", "#b9b39a"),
-    "REVIEWED": ("#E4E4E4", "#212529", "#a0a0a0"),
-    "PLANNED": ("#64748B", "#ffffff", "#64748B"),
+STATUS_STYLE = {  # fill, text, border
+    "REJECTED": ("#DC2626", "#ffffff", "#DC2626"),
+    "SUBMITTED": ("#F59E0B", "#1f2937", "#F59E0B"),
+    "DRAFT": ("#E2E8F0", "#1f2937", "#94A3B8"),
+    "APPROVED": ("#16A34A", "#ffffff", "#16A34A"),
 }
 FONTS = ["'FreeSans'", "'DejaVu Sans'", "'Carlito'", "'Liberation Sans', 'FreeSans'"]
 WD = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"]
@@ -40,7 +41,7 @@ def make_sheet(rng: random.Random) -> dict:
     weekdays = [d for d in range(1, ndays + 1) if calendar.weekday(year, month, d) < 5]
     person = str(rng.randint(100000, 199999))
     surname, given = rng.choice(SURNAMES), rng.choice(GIVEN)
-    name = f"{surname}, {given} ({given[0]}.)"
+    name = f"{given.title()} {surname.title()}"
     job = rng.choice(JOB_FAMILIES)
 
     n_std = rng.randint(1, 7)
@@ -75,10 +76,10 @@ def make_sheet(rng: random.Random) -> dict:
     for ln in lines:
         ln["total"] = sum(ln["days"].values())
     totals = {
-        "NB": sum(ln["total"] for ln in lines if ln["uom"] == "NB"),
         "REG": sum(ln["total"] for ln in lines if ln["uom"] == "REG"),
+        "NB": sum(ln["total"] for ln in lines if ln["uom"] == "NB"),
     }
-    totals["TOTAL"] = totals["NB"] + totals["REG"]
+    totals["TOTAL"] = totals["REG"] + totals["NB"]
     return {
         "employee_name": name, "person_id": person, "supplier": "ACME", "job_family": job,
         "month": month, "year": year, "days_in_month": ndays, "lines": lines, "totals": totals,
@@ -88,7 +89,7 @@ def make_sheet(rng: random.Random) -> dict:
 def render_html(sheet: dict, font: str) -> str:
     y, m, n = sheet["year"], sheet["month"], sheet["days_in_month"]
     day_head = "".join(
-        f"<th class='d'><b>{d}</b><br><span class='{'we' if calendar.weekday(y, m, d) >= 5 else 'wd'}'>"
+        f"<th class='d'>{d}<br><span class='{'we' if calendar.weekday(y, m, d) >= 5 else 'wd'}'>"
         f"{WD[calendar.weekday(y, m, d)]}</span></th>" for d in range(1, n + 1)
     )
     body = []
@@ -97,80 +98,54 @@ def render_html(sheet: dict, font: str) -> str:
         cells = []
         for d in range(1, n + 1):
             v = ln["days"].get(str(d))
-            if v is None:
-                cells.append("<td class='c'><div class='box'></div></td>")
-            else:
-                cells.append(
-                    f"<td class='c'><div class='box' style='background:{bg};color:{fg};"
-                    f"border-color:{border}'>{v}</div></td>"
-                )
+            style = "" if v is None else f" style='background:{bg};color:{fg};border-color:{border}'"
+            cells.append(f"<td class='c'><div class='box'{style}>{'' if v is None else v}</div></td>")
         body.append(
-            "<tr><td class='sel'><input type='checkbox'></td>"
-            f"<td><span class='dd'>{sheet['person_id']} <i>&#8964;</i></span></td>"
-            f"<td>{sheet['supplier']}</td><td>{sheet['job_family']}</td>"
-            f"<td><span class='dd uom'>{ln['uom']} <i>&#8964;</i></span></td>"
-            f"<td>{ln['project_id']}</td><td class='sp'>{ln['sub_project']}{' -' if ln['uom'] == 'NB' else ''}</td>"
-            f"<td>{ln['sub_project_id']}</td><td><a>Remark</a></td>{''.join(cells)}"
-            f"<td class='tot'>{ln['total']}</td></tr>"
+            f"<tr><td>{sheet['person_id']}</td><td>{sheet['supplier']}</td><td>{sheet['job_family']}</td>"
+            f"<td class='code'>{ln['uom']}</td><td>{ln['project_id']}</td><td class='sp'>{ln['sub_project']}</td>"
+            f"<td>{ln['sub_project_id']}</td><td></td>{''.join(cells)}<td class='tot'>{ln['total']}</td></tr>"
         )
+
     def totals_row(label, kind):
-        vals = []
-        for d in range(1, n + 1):
-            s = sum(ln["days"].get(str(d), 0) for ln in sheet["lines"] if kind in (None, ln["uom"]))
-            vals.append(f"<td class='tv'>{s}</td>")
+        rows = [ln for ln in sheet["lines"] if kind in (None, ln["uom"])]
+        vals = "".join(f"<td class='tv'>{sum(ln['days'].get(str(d), 0) for ln in rows)}</td>" for d in range(1, n + 1))
         grand = sheet["totals"]["TOTAL" if kind is None else kind]
-        return (f"<tr class='trow'><td colspan='8' class='lbl'>{label}</td><td class='k'>"
-                f"{kind or 'Total'}</td>{''.join(vals)}<td class='tv'>{grand}</td></tr>")
+        return f"<tr class='trow'><td colspan='8' class='lbl'>{label}</td>{vals}<td class='tv tot'>{grand}</td></tr>"
 
     return f"""<!doctype html><html><head><style>
-body{{margin:0;background:#f3f4f6;font-family:{font};font-variant-ligatures:none;color:#212529;width:1880px}}
-.top{{display:flex;align-items:center;background:#f8f9fa;height:118px}}
-.burger{{width:120px;text-align:center;font-size:26px}}
-.logo{{width:135px;height:118px;background:#1e293b;color:#fff;font-weight:bold;font-size:20px;
-display:flex;align-items:flex-end;justify-content:center;letter-spacing:3px}}
-.title{{padding-left:12px}} .title h1{{font-size:30px;font-weight:normal;margin:6px 0 16px}}
-.title .g{{font-size:19px}}
-.nav{{display:flex;gap:40px;align-items:center;background:#eef0f2;height:44px;padding-left:50px;margin-top:8px}}
-.nav .b{{background:#334155;color:#fff;padding:7px 18px;border-radius:3px;font-size:19px}}
-.bar{{display:flex;justify-content:space-between;padding:14px 12px}}
-.btn{{background:#334155;color:#fff;padding:9px 12px;border-radius:4px;font-size:15px}}
-.right{{display:flex;gap:18px;margin-right:260px;margin-top:10px}}
-.sel2{{background:#334155;color:#fff;padding:6px 8px;border-radius:4px;font-size:18px;min-width:40px}}
-table{{border-collapse:collapse;margin-left:14px;font-size:14px;background:#f3f4f6}}
-th,td{{border:1px solid #dee2e6;padding:3px 4px;white-space:nowrap}}
-th{{font-weight:bold}} th.d{{text-align:center;width:26px;font-size:14px}}
-.wd{{color:#777;font-weight:normal}} .we{{color:#e0102a;font-weight:normal}}
+body{{margin:0;background:#ffffff;font-family:{font};font-variant-ligatures:none;color:#1f2937;width:1880px}}
+.app{{background:#1e293b;color:#f8fafc;height:56px;display:flex;align-items:center;padding-left:24px;
+font-size:22px;font-weight:bold;letter-spacing:1px}}
+.who{{margin:22px 0 18px 24px;font-size:17px;line-height:30px}}
+.who span{{display:inline-block;width:110px;color:#64748b}}
+table{{border-collapse:collapse;margin-left:24px;font-size:14px}}
+th,td{{border:1px solid #e2e8f0;padding:4px 6px;white-space:nowrap}}
+th{{font-weight:600;background:#ffffff;color:#334155;text-align:left}}
+th.d{{text-align:center;width:32px;font-size:13px}}
+.wd{{color:#64748b;font-weight:normal}} .we{{color:#ea580c;font-weight:normal}}
 td.c{{padding:3px 3px}}
-.box{{width:26px;height:21px;border:1px solid #9a9a9a;background:#fff;text-align:center;
-line-height:21px;font-size:14px}}
-.dd{{color:#999;border:1px solid #e3e3e3;padding:1px 4px}} .dd i{{font-style:normal;font-size:11px}}
-.uom{{display:inline-block;width:56px}}
-td.sp{{max-width:84px;white-space:normal}}
-a{{color:#1a55d6;text-decoration:underline}}
-td.tv{{text-align:center}} td.lbl{{text-align:right;border-right:none}} td.k{{font-weight:bold;border-left:none}}
-.legend{{display:flex;gap:60px;margin:40px 0 0 500px;font-size:14px}}
-.sw{{display:inline-block;width:24px;height:20px;margin-right:40px;vertical-align:middle}}
+.box{{width:32px;height:22px;border:1px solid #94a3b8;border-radius:3px;background:#fff;text-align:center;
+line-height:22px;font-size:14px}}
+td.code{{font-weight:600;color:#334155}}
+td.sp{{max-width:96px;white-space:normal}}
+td.tv{{text-align:center}} td.lbl{{text-align:right;font-weight:600;color:#334155}} td.tot{{font-weight:600}}
+.legend{{display:flex;gap:44px;margin:28px 0 0 24px;font-size:14px;color:#334155}}
+.sw{{display:inline-block;width:18px;height:14px;margin-right:10px;vertical-align:middle;border-radius:3px}}
 </style></head><body>
-<div class='top'><div class='burger'>&#9776;</div><div class='logo'>Timesheet</div>
-<div class='title'><h1>Welcome to <b>Timesheet</b></h1>
-<div class='g'>Employee, <b>{sheet['employee_name']}</b></div></div></div>
-<div class='nav'><span>Home</span><span class='b'>Time Sheet</span><span>Help &#9662;</span></div>
-<div class='bar'><span class='btn'>Add Task</span><div class='right'><span class='btn'>Remove Task</span>
-<span class='sel2'>{y} &#8964;</span>
-<span class='sel2' style='min-width:90px'>{calendar.month_name[m]} &#8964;</span></div></div>
-<table><tr><th>Select<br><input type='checkbox'></th><th>Person ID</th><th>Supplier</th>
-<th>Role</th><th>UOM</th><th>Project ID</th><th>Sub Project</th><th>Sub Project ID</th>
-<th>Remarks</th>{day_head}<th>Total</th></tr>
+<div class='app'>Timesheet</div>
+<div class='who'><div><span>Employee</span><b>{sheet['employee_name']}</b></div>
+<div><span>Period</span><b>{calendar.month_name[m]} {y}</b></div></div>
+<table><tr><th>Employee ID</th><th>Client</th><th>Role</th><th>Type</th><th>Project Code</th><th>Task</th>
+<th>Task Code</th><th>Notes</th>{day_head}<th>Total</th></tr>
 {''.join(body)}
-{totals_row('Total', 'NB')}
-{totals_row('Total', 'REG')}
-{totals_row('', None)}
+{totals_row('Total REG', 'REG')}
+{totals_row('Total NB', 'NB')}
+{totals_row('Grand total', None)}
 </table>
-<div class='legend'><span><span class='sw' style='background:#64748B'></span>Planned</span>
-<span><span class='sw' style='background:#DC2626'></span>Submitted</span>
-<span><span class='sw' style='background:#FEF3C7'></span>Approved</span>
-<span><span class='sw' style='background:#E4E4E4'></span>Reviewed</span></div>
-<div style='height:60px'></div></body></html>"""
+<div class='legend'>{''.join(
+    f"<span><span class='sw' style='background:{STATUS_STYLE[k][0]}'></span>{k.title()}</span>"
+    for k in ("DRAFT", "SUBMITTED", "APPROVED", "REJECTED"))}</div>
+<div style='height:40px'></div></body></html>"""
 
 
 DEFAULT_DIR = Path(__file__).resolve().parents[1] / "test-data" / "synthetic"
