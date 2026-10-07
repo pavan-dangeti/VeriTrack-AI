@@ -14,7 +14,7 @@ the sheet's own totals, and flags any customer-side leave that is missing from t
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1?style=flat-square&logo=postgresql&logoColor=white)
 ![React](https://img.shields.io/badge/React-19-20232A?style=flat-square&logo=react&logoColor=61DAFB)
 ![TypeScript](https://img.shields.io/badge/TypeScript-6-3178C6?style=flat-square&logo=typescript&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-380%20passing-2ea44f?style=flat-square)
+[![CI](https://github.com/pavan-dangeti/VeriTrack-AI/actions/workflows/ci.yml/badge.svg)](https://github.com/pavan-dangeti/VeriTrack-AI/actions/workflows/ci.yml)
 ![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)
 
 <img src="docs/media/demo.gif" alt="Upload four timesheet screenshots, watch them get verified, review one sheet and run the leave analysis" width="900" />
@@ -36,8 +36,8 @@ Full-quality video: <a href="docs/media/demo.mp4">docs/media/demo.mp4</a></sub>
 
 ## Why
 
-Every month, managers collect screenshots of each engineer's **Timesheet** timesheet and check by hand that each
-*Out Of Office* day booked with the customer also exists in the company's internal leave register. It is
+Every month, managers collect screenshots of each consultant's client-side timesheet and check by hand that
+each *Out Of Office* day booked there also exists in the company's own leave register. It is
 slow, error-prone, and one misread digit sends the wrong email.
 
 VeriTrack automates the whole loop and is built around one rule: **a number that cannot be proven is never
@@ -152,7 +152,7 @@ OCR suites use synthetic sheets with invented people and projects, rendered on d
 
 | Suite | What it proves | Result |
 |---|---|---|
-| **Backend** (`pytest tests`) | API, auth, rules, OCR, concurrency, recovery, exports, migrations | **283 passed** |
+| **Backend** (`pytest tests`) | API, auth, rules, OCR, concurrency, recovery, exports, migrations | **293 passed** |
 | &nbsp;&nbsp;OCR accuracy | 16 synthetic sheets (28–31-day months, 1–9 projects, 4 fonts, 90–150 % zoom) read field-for-field | **16/16 exact** |
 | &nbsp;&nbsp;Capture conditions | 4 sheets × 7 degradations (80–200 % zoom, JPEG q60, blur, noise): every hour, total, status, ID and period | **28/28 exact** |
 | &nbsp;&nbsp;Hostile inputs | cropped totals, cut-off columns, rotation, grayscale, tiny, padded: exact *or* flagged — never verified-and-wrong | **7/7** |
@@ -172,6 +172,7 @@ Latency during the load test (≈ 38 000 requests, OCR saturating the CPU the wh
 
 The login burst is bcrypt (cost 12) competing for 2 vCPUs — deliberate slowness that protects passwords; it
 scales with CPU count and is a one-off per session (sessions refresh silently for 7 days).
+
 
 ## Getting started
 
@@ -278,7 +279,7 @@ docs/                 deployment guide, screenshots, demo video
 
 ## Known limitations
 
-- The timesheet reader is specialised for the Timesheet *Time Sheet* page; other scans go through a generic table reader
+- The timesheet reader is tuned to one timesheet layout (the one `scripts/gen_synthetic_timesheets.py` renders); other scans go through a generic table reader
   and are flagged for review more often.
 - Free-text labels (names, sub-project titles) can pick up small OCR slips on heavily degraded images; they are
   informational — the leave rule keys on person ID, hour type and dates, which are verified.

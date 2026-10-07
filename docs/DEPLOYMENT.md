@@ -16,8 +16,8 @@ browser ──► https://<app>.vercel.app  ──(/api/* rewrite)──► http
 1. Push this repository to GitHub.
 2. Render dashboard → **New → Blueprint** → select the repo. `render.yaml`
    creates:
-   * `veritrack-api` — Docker web service (migrations run on every boot, the
-     Master Admin is seeded once),
+   * `veritrack-api` — Docker web service (migrations run on every boot and the
+     Master Admin is synced from `ADMIN_EMAIL` / `ADMIN_PASSWORD`),
    * `veritrack-db` — managed PostgreSQL wired in as `DATABASE_URL`,
    * a 5 GB persistent disk for uploaded files and reports
      (`STORAGE_BACKEND=volume`).
@@ -41,8 +41,19 @@ browser ──► https://<app>.vercel.app  ──(/api/* rewrite)──► http
 >
 > **Free plan (demo only).** In the Blueprint form set *Blueprint Path* to
 > `render-free.yaml`. No card is needed, but the API sleeps after 15 minutes idle,
-> has 0.1 CPU (about a minute of OCR per sheet), loses uploaded files on restart,
-> and the free database expires after 30 days.
+> has 0.1 CPU (about a minute of OCR per sheet) and keeps uploaded files only until
+> the next restart or deploy (there is no disk on the free plan).
+> The free blueprint uses a free [Neon](https://neon.tech) PostgreSQL database instead
+> of Render's (which expires after 30 days):
+>
+> 1. Neon → create a project → *Connect* → turn **Connection pooling off** and copy the
+>    connection string. The API refuses Neon's pooled (`-pooler`) host, whose
+>    transaction pooling breaks asyncpg's prepared statements.
+> 2. Paste it into Render as `DATABASE_URL`. Keep `?sslmode=require`: in production the
+>    API refuses a database connection without TLS. `channel_binding=require` may stay;
+>    it is dropped automatically because asyncpg does not take that option.
+> 3. Deploy. Migrations run on boot, and the Master Admin is created from
+>    `ADMIN_EMAIL` / `ADMIN_PASSWORD`.
 >
 > **No persistent disk?** Set `STORAGE_BACKEND=s3` with any S3-compatible bucket
 > (`S3_BUCKET`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`, `S3_ENDPOINT_URL` for R2/MinIO)
