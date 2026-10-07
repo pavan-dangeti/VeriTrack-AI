@@ -11,6 +11,9 @@ from app.core.config import Settings
         ("postgres://u:p@h:5432/db", "postgresql+asyncpg://u:p@h:5432/db"),
         ("postgresql://u:p@h/db?sslmode=require", "postgresql+asyncpg://u:p@h/db?ssl=require"),
         ("postgresql+asyncpg://u:p@h/db", "postgresql+asyncpg://u:p@h/db"),
+        # Neon
+        ("postgresql://u:p@ep-x.aws.neon.tech/db?sslmode=require&channel_binding=require",
+         "postgresql+asyncpg://u:p@ep-x.aws.neon.tech/db?ssl=require"),
     ],
 )
 def test_provider_database_urls_are_normalised(given, expected):
@@ -22,6 +25,22 @@ def test_production_refuses_insecure_defaults():
         Settings(environment="production", jwt_secret_key="short")
     with pytest.raises(ValueError):
         Settings(environment="production", jwt_secret_key="x" * 40, cors_origins="https://*.example.com")
+
+
+def test_production_requires_tls_to_a_remote_database():
+    prod = {"environment": "production", "jwt_secret_key": "x" * 40}
+    with pytest.raises(ValueError, match="TLS"):
+        Settings(**prod, database_url="postgresql://u:p@ep-x.aws.neon.tech/db")
+    with pytest.raises(ValueError, match="TLS"):
+        Settings(**prod, database_url="postgresql://u:p@ep-x.aws.neon.tech/db?sslmode=disable")
+    assert Settings(**prod, database_url="postgresql://u:p@ep-x.aws.neon.tech/db?sslmode=require").database_uses_tls
+    Settings(**prod, database_url="postgresql://u:p@db:5432/db")  # docker-compose service name
+    Settings(**prod, database_url="postgresql://u:p@localhost/db")
+
+
+def test_pooled_neon_endpoint_is_refused():
+    with pytest.raises(ValueError, match="direct connection"):
+        Settings(database_url="postgresql://u:p@ep-x-pooler.aws.neon.tech/db?sslmode=require")
 
 
 def test_cross_site_cookies_force_secure():

@@ -3,6 +3,7 @@
 from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Self
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from pydantic import BeforeValidator, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
@@ -133,14 +134,28 @@ class Settings(BaseSettings):
     @field_validator("database_url", mode="before")
     @classmethod
     def _asyncpg_url(cls, value):
-        """Accept the URLs hosting providers hand out (postgres://…,
-        postgresql://…?sslmode=require) and route them through asyncpg."""
+        """Accept the URLs hosting providers hand out (postgres://…, ?sslmode=require,
+        Neon's &channel_binding=require) and route them through asyncpg."""
         if not isinstance(value, str):
             return value
         for prefix in ("postgres://", "postgresql://"):
             if value.startswith(prefix):
                 value = "postgresql+asyncpg://" + value[len(prefix):]
-        return value.replace("sslmode=require", "ssl=require")
+        url = urlsplit(value)
+        # asyncpg names the option ssl and has no channel_binding argument (SCRAM is negotiated anyway)
+        query = [("ssl" if k == "sslmode" else k, v) for k, v in parse_qsl(url.query) if k != "channel_binding"]
+        return urlunsplit(url._replace(query=urlencode(query)))
+
+    @property
+    def database_uses_tls(self) -> bool:
+        ssl = dict(parse_qsl(urlsplit(self.database_url).query)).get("ssl", "")
+        return ssl in {"require", "verify-ca", "verify-full"}
+
+    @property
+    def database_is_private(self) -> bool:
+        """Loopback or a single-label host (a docker-compose service name) never leaves the machine."""
+        host = urlsplit(self.database_url).hostname or ""
+        return host in {"localhost", "127.0.0.1", "::1"} or "." not in host
 
     @model_validator(mode="after")
     def validate_secrets(self) -> Self:
@@ -154,6 +169,11 @@ class Settings(BaseSettings):
             wildcard = {o for o in self.cors_origins if "*" in o}
             if wildcard:
                 raise ValueError("CORS_ORIGINS must not contain wildcards in production")
+            if not (self.database_uses_tls or self.database_is_private):
+                raise ValueError("DATABASE_URL must use TLS in production (add ?sslmode=require)")
+        if "-pooler." in (urlsplit(self.database_url).hostname or ""):
+            # PgBouncer transaction pooling breaks asyncpg's prepared statements
+            raise ValueError("DATABASE_URL points at a Neon pooled endpoint; use the direct connection string")
         if not self.jwt_secret_key:
             if self.environment != "development":
                 raise ValueError("JWT_SECRET_KEY is required outside development")
