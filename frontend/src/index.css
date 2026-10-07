@@ -42,7 +42,7 @@
   --color-danger-500: var(--vt-danger-500);
   --color-danger-700: var(--vt-danger-700);
 
-  /* status cell legend — mirrors the Timesheet web app so reviewers recognise it */
+  /* cell status legend: the same colours the timesheet uses */
   --color-status-signed: #DC2626;
   --color-status-pm: #fff6c9;
   --color-status-lm: #e4e4e7;

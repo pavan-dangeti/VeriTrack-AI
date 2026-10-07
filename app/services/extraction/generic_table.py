@@ -1,4 +1,4 @@
-"""OCR table reader for scanned non-Timesheet lists (employee repositories, leave registers).
+"""OCR table reader for scanned non-timesheet lists (employee repositories, leave registers).
 
 Each data line is read positionally (words under the header label they line up with) and
 semantically (IDs, e-mails and names recognised by shape); the stronger reading wins.

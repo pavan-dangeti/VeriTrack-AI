@@ -15,13 +15,14 @@ from tests.conftest import open_session
 from tests.helpers import admin, create_user, csv_file, manager
 
 REPO = "Employee ID,Full Name,Company Email\nE-1,Ann,ann@corp.io\nE-2,Bob,bob@corp.io\n"
-Timesheet = "Employee ID,Name,Customer Leave,Company Leave\nE-1,Ann,x,\nE-2,Bob,x,x\n"
+TIMESHEET_CSV = "Employee ID,Name,Customer Leave,Company Leave\nE-1,Ann,x,\nE-2,Bob,x,x\n"
 
 
 async def _analysed_batch(client, tag: str) -> tuple[dict, str]:
     h = await manager(client, tag)
     await client.post("/api/v1/uploads?kind=EMPLOYEE_REPO", files=[csv_file("r.csv", REPO)], headers=h)
-    batch = (await client.post("/api/v1/uploads?kind=TIMESHEET", files=[csv_file("g.csv", Timesheet)], headers=h)).json()
+    batch = (await client.post(
+        "/api/v1/uploads?kind=TIMESHEET", files=[csv_file("g.csv", TIMESHEET_CSV)], headers=h)).json()
     r = await client.post(f"/api/v1/batches/{batch['id']}/analyze", headers=h)
     assert r.status_code == 202, r.text
     run_id = (await client.get(f"/api/v1/batches/{batch['id']}/analysis", headers=h)).json()["run_id"]
@@ -98,7 +99,8 @@ class TestAnalyzeClaim:
 
         h = await manager(client, "f.claim")
         await client.post("/api/v1/uploads?kind=EMPLOYEE_REPO", files=[csv_file("r.csv", REPO)], headers=h)
-        batch = (await client.post("/api/v1/uploads?kind=TIMESHEET", files=[csv_file("g.csv", Timesheet)], headers=h)).json()
+        batch = (await client.post(
+            "/api/v1/uploads?kind=TIMESHEET", files=[csv_file("g.csv", TIMESHEET_CSV)], headers=h)).json()
         monkeypatch.setattr(settings, "processing_mode", "background")
         codes = await asyncio.gather(*(
             client.post(f"/api/v1/batches/{batch['id']}/analyze", headers=h) for _ in range(4)
@@ -113,7 +115,8 @@ class TestAnalyzeClaim:
         from app.services import jobs
 
         h = await manager(client, "f.running")
-        batch = (await client.post("/api/v1/uploads?kind=TIMESHEET", files=[csv_file("g.csv", Timesheet)], headers=h)).json()
+        batch = (await client.post(
+            "/api/v1/uploads?kind=TIMESHEET", files=[csv_file("g.csv", TIMESHEET_CSV)], headers=h)).json()
         monkeypatch.setattr(settings, "processing_mode", "background")
         assert (await client.post(f"/api/v1/batches/{batch['id']}/analyze", headers=h)).status_code == 202
         first = await client.get(f"/api/v1/batches/{batch['id']}/analysis", headers=h)

@@ -61,9 +61,9 @@ def _extract(content_type: str, data: bytes, kind: str | None = None):
     rows = [verify_row(r) for r in normalize_tables(tables, kind=kind)]
     meta: dict = {}
     for table in tables:
-        sheet = (getattr(table, "meta", None) or {}).get("timesheet_sheet")
+        sheet = (getattr(table, "meta", None) or {}).get("sheet")
         if sheet:
-            meta.setdefault("timesheet_sheets", []).append(sheet)
+            meta.setdefault("sheets", []).append(sheet)
     return rows, meta
 
 

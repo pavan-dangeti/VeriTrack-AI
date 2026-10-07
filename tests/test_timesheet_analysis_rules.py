@@ -54,7 +54,7 @@ REPO = "Employee ID,Full Name,Company Email\n100001,Alpha,alpha@example.com\n"
 
 class TestTimesheetAnalysisEdges:
     async def test_timesheet_export_without_period_never_raises_false_violations(self, client, ma_user_id):
-        """A Timesheet spreadsheet export carries no month: its Out Of Office days
+        """A timesheet spreadsheet export carries no month: its Out Of Office days
         cannot be dated, so they must not be reported as missing leave."""
         h = await manager(client, "ts.edge")
         await client.post("/api/v1/uploads?kind=EMPLOYEE_REPO", files=[csv_file("r.csv", REPO)], headers=h)

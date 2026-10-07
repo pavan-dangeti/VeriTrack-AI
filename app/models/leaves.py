@@ -9,7 +9,7 @@ from app.db.base import Base
 
 
 class CompanyLeave(Base):
-    """One leave day in the company leave register. Every Timesheet 'Out Of Office' day needs a matching row here;
+    """One leave day in the company leave register. Every timesheet 'Out Of Office' day needs a matching row here;
     unique per manager/employee/day so re-uploads are idempotent."""
 
     __tablename__ = "company_leaves"

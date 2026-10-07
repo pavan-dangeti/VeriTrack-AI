@@ -1,4 +1,4 @@
-"""Analysis orchestration: run the Timesheet rules over a batch, persist deduped violations, email, report."""
+"""Analysis orchestration: run the timesheet rules over a batch, persist deduped violations, email, report."""
 
 import uuid
 from datetime import UTC, datetime
@@ -125,7 +125,7 @@ async def _analyze_timesheets(db, run, batch, rows, repo, counts, skip_log, seen
             email_to=email_to,
             email_status=EmailStatus.PENDING if email_to else EmailStatus.SKIPPED_NO_EMAIL,
             details={
-                "source": "TIMESHEET_TIMESHEET",
+                "source": "TIMESHEET",
                 "periods": sorted(e["periods"]),
                 "customer_leave_dates": [d.isoformat() for d in sorted(e["dates"])],
                 "missing_in_register": [d.isoformat() for d in missing],

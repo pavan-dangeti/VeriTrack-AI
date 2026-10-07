@@ -89,7 +89,9 @@ FORBIDDEN = {
         "/employee-data",
         "/monthly-timesheets",
     ],
-    "MASTER_ADMIN": ["/timesheets", "/employees", "/reports", "/hr-team", "/directory", "/employee-data", "/monthly-timesheets"],
+    "MASTER_ADMIN": [
+        "/timesheets", "/employees", "/reports", "/hr-team", "/directory", "/employee-data", "/monthly-timesheets",
+    ],
 }
 
 

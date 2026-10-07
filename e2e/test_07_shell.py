@@ -75,7 +75,7 @@ def test_command_palette_keyboard_and_mouse(manager):
     expect(pal).to_be_hidden()
     manager.settle()
 
-    # hint text is searchable too ("timesheets" is in the Timesheet hint)
+    # hint text is searchable too ("timesheets" is in the timesheet hint)
     p.keyboard.press("Control+k")
     search.fill("timesheets")
     expect(pal.get_by_role("option").first).to_contain_text("Timesheet Uploads")

@@ -1054,7 +1054,7 @@ class _SheetReader:
         sub = re.sub(r"(?<=[A-Za-z])[.,:;'`](?=\s)", "", sub)   # stray recogniser dots
         sub = re.sub(r"[\s\-:;.,_~]+$", "", sub)
         if _fuzzy(_norm(sub), "outofoffice") >= 0.85:
-            sub = "Out Of Office"          # the sheet's canonical leave project
+            sub = "Out Of Office"          # the sheet's leave project
         line.sub_project = sub
         line.sub_project_id = re.sub(r"\D", "", values.get("sub_project_id", ""))
         line.remarks = values.get("remarks", "").strip()
@@ -1235,7 +1235,7 @@ class _SheetReader:
         letters = [c for c in self.sheet.employee_name if c.isalpha()]
         timesheet_style = re.search(r"\([A-Za-z]\.?\)$", self.sheet.employee_name)
         if letters and (timesheet_style or sum(c.isupper() for c in letters) >= 0.6 * len(letters)):
-            # Timesheet prints names in capitals; recognisers slip on case alone
+            # the sheet prints names in capitals; recognisers slip on case alone
             self.sheet.employee_name = self.sheet.employee_name.upper()
         if self.sheet.month is None or self.sheet.year is None:
             self._period_from_text(" ".join(t["text"] for t in tokens))

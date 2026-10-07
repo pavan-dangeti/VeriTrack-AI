@@ -20,7 +20,8 @@ def test_admin_every_sidebar_page(admin):
     for m in ("Employees", "Batches uploaded", "Analysis runs", "Violations detected", "Emails sent"):
         expect(admin.page.get_by_test_id(f"metric-{m}")).to_contain_text(re.compile(r"\d"))
     expect(admin.page.get_by_text("Active accounts by role")).to_be_visible()
-    for title, path in (("Manage users", "/users"), ("All timesheet uploads", "/all-uploads"), ("Analytics", "/analytics")):
+    links = (("Manage users", "/users"), ("All timesheet uploads", "/all-uploads"), ("Analytics", "/analytics"))
+    for title, path in links:
         admin.page.locator("main").get_by_role("link").filter(has_text=title).first.click()
         admin.page.wait_for_url(re.compile(re.escape(path) + "$"))
         admin.settle()

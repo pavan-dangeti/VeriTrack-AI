@@ -53,7 +53,7 @@ vi.mock("../api/client", () => ({
       return Promise.resolve({
         file: { id: "f1", original_filename: "timesheet_sample.png", status: "DONE", file_size: 1, content_type_detected: "image/png",
           error_message: null, rows_extracted: 2, needs_review_count: 0 },
-        meta: { timesheet_sheets: [sheet(state.verified)] },
+        meta: { sheets: [sheet(state.verified)] },
         rows: [],
       });
     }

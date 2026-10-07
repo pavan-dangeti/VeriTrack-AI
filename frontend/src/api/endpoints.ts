@@ -165,7 +165,7 @@ export interface ParsedSheet {
 
 interface FileExtraction {
   file: BatchFile;
-  meta: { timesheet_sheets?: ParsedSheet[] };
+  meta: { sheets?: ParsedSheet[] };
   rows: {
     id: number;
     row_index: number;

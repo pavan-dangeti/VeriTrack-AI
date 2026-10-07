@@ -73,8 +73,8 @@ def test_non_timesheet_image_ends_failed_or_needs_review(manager):
     img.putdata([(rnd.randrange(256), rnd.randrange(256), rnd.randrange(256)) for _ in range(900 * 500)])
     buf = io.BytesIO()
     img.save(buf, "PNG")
-    # the batch watcher toasts "timesheet batch failed (1 file)" — expected here
-    manager.guard.allow_toast(r"timesheet batch failed")
+    # the batch watcher toasts "Timesheet batch failed (1 file)" — expected here
+    manager.guard.allow_toast(r"Timesheet batch failed")
     p.get_by_test_id("timesheet-file-input").set_input_files(
         [{"name": f"noise-{RUN_ID}.png", "mimeType": "image/png", "buffer": buf.getvalue()}]
     )

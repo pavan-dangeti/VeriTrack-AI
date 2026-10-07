@@ -65,7 +65,7 @@ def timesheet_table(sheet) -> Any:
         ])
         confs.append(line.confidence)
     return RawTable(headers=headers, rows=rows, row_confidences=confs,
-                    meta={"timesheet_sheet": sheet.to_dict()})
+                    meta={"sheet": sheet.to_dict()})
 
 
 def _fmt(v) -> str:

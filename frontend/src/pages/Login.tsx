@@ -6,7 +6,7 @@ import { useAuth } from "../auth/AuthContext";
 import { Button, Input } from "../components/ui/kit";
 
 const FEATURES = [
-  { icon: ScanLine, title: "Verified Timesheet extraction", text: "Every hour is reconciled against the sheet's own totals." },
+  { icon: ScanLine, title: "Verified timesheet extraction", text: "Every hour is reconciled against the sheet's own totals." },
   { icon: CalendarCheck2, title: "Leave compliance", text: "Out Of Office days matched to the company leave register." },
   { icon: Sparkles, title: "Reports that write themselves", text: "PDF + Excel summaries and automatic notifications." },
 ];

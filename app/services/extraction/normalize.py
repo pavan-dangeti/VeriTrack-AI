@@ -316,7 +316,7 @@ def normalize_leave_row(mapping: dict[str, str], headers: list[str], cells: list
 def normalize_tables(tables, *, kind: str | None = None) -> list[NormalizedRow]:
     rows: list[NormalizedRow] = []
     for table in tables:
-        sheet = (getattr(table, "meta", None) or {}).get("timesheet_sheet")
+        sheet = (getattr(table, "meta", None) or {}).get("sheet")
         if sheet:
             rows.extend(normalize_timesheet(sheet))
             continue

@@ -167,7 +167,7 @@ Latency during the load test (≈ 38 000 requests, OCR saturating the CPU the wh
 |---|---|---|
 | Dashboard / lists | 23–30 ms | 82–114 ms |
 | Analysis trigger / result | 27–30 ms | 133–273 ms |
-| timesheet upload (stored + queued) | 0.54 s | 2.1 s |
+| Timesheet upload (stored + queued) | 0.54 s | 2.1 s |
 | Login, 50 users in the same second | 7 s | 10.5 s |
 
 The login burst is bcrypt (cost 12) competing for 2 vCPUs — deliberate slowness that protects passwords; it

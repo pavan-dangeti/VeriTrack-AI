@@ -109,7 +109,7 @@ describe("profile pages", () => {
     expect(screen.getAllByText("mgr@corp.io").length).toBeGreaterThan(0);
     expect(screen.getByText("HR accounts")).toBeInTheDocument();
     expect(screen.getByText("Employees in repository")).toBeInTheDocument();
-    expect(screen.getByText("1 / 2")).toBeInTheDocument(); // Timesheet completed/total
+    expect(screen.getByText("1 / 2")).toBeInTheDocument(); // timesheets completed/total
     const link = screen.getByRole("link", { name: "hr@corp.io" });
     expect(link).toHaveAttribute("href", "/people/h1");
   });
@@ -164,6 +164,6 @@ describe("drill-down route protection", () => {
     mockAuth.user = { id: "x1", email: "exec@corp.io", role: "EXECUTIVE" };
     renderAt("/people/m1");
     expect(await screen.findByTestId("user-profile-page")).toBeInTheDocument();
-    expect(screen.getByText("timesheet batch history")).toBeInTheDocument();
+    expect(screen.getByText("Timesheet batch history")).toBeInTheDocument();
   });
 });

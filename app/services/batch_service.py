@@ -251,7 +251,7 @@ def _max_file_mb() -> int:
 async def purge_obsolete_batches(
     db: AsyncSession, *, actor: User, retention_days: int
 ) -> dict:
-    """Hard-purges Timesheet/repo batches past the retention window; employees are never touched.
+    """Hard-purges timesheet/repo batches past the retention window; employees are never touched.
 
     Blob deletion is best-effort: a storage failure must not roll back the DB purge.
     """

@@ -2,4 +2,4 @@
 pytest>=8.4
 pytest-asyncio>=1.1
 ruff>=0.12
-playwright>=1.48  # synthetic Timesheet generator (scripts/gen_synthetic_timesheets.py)
+playwright>=1.48  # synthetic timesheet generator (scripts/gen_synthetic_timesheets.py)

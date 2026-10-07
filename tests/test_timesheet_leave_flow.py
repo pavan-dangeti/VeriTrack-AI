@@ -131,7 +131,7 @@ class TestTimesheetLeaveFlow:
         fid = detail["files"][0]["id"]
         ext = (await client.get(f"/api/v1/uploads/batches/{batch['id']}/files/{fid}/extraction",
                                 headers=h)).json()
-        sheet = ext["meta"]["timesheet_sheets"][0]
+        sheet = ext["meta"]["sheets"][0]
         assert sheet["verified"] is True
         truth = TRUTH["synthetic_002.png"]
         assert sheet["employee_name"] == truth["employee_name"]

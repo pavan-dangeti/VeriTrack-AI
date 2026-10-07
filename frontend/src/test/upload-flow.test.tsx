@@ -105,7 +105,7 @@ function renderUploads() {
   );
 }
 
-describe("Manager Timesheet flow", () => {
+describe("Manager timesheet flow", () => {
   it("upload → per-file real statuses → analyze → export/download available", async () => {
     renderUploads();
     await waitFor(() => screen.getByTestId("timesheet-file-input"));

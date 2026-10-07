@@ -35,7 +35,7 @@ import { fmtBytes, fmtDateTime, fmtPeriod, timeAgo } from "../lib/format";
 const ALLOWED = ["png", "jpg", "jpeg", "pdf", "xlsx", "xls", "csv"];
 
 const STEPS = [
-  { icon: ScanLine, title: "Upload screenshots", text: "timesheet screenshots, PDFs or exports — up to 20 per batch." },
+  { icon: ScanLine, title: "Upload screenshots", text: "Timesheet screenshots, PDFs or exports — up to 20 per batch." },
   { icon: ShieldCheck, title: "Verified extraction", text: "Every hour is cross-checked against the sheet's own totals." },
   { icon: BarChart3, title: "Run analysis", text: "Out Of Office days are matched against the company leave register." },
 ];

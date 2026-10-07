@@ -49,7 +49,7 @@ export function SheetReviewPage() {
       </Card>
     );
   }
-  const sheets = data.meta.timesheet_sheets ?? [];
+  const sheets = data.meta.sheets ?? [];
 
   return (
     <div data-testid="sheet-review-page">
