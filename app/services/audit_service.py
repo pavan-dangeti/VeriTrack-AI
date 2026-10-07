@@ -42,7 +42,7 @@ async def record(
         ip_address=ip_address,
         user_agent=user_agent,
         result=result,
-        metadata=metadata,
+        event_metadata=metadata,
     )
     db.add(entry)
     await db.commit()

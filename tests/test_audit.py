@@ -165,3 +165,15 @@ class TestAuditListingEndpoint:
         )
         token = login.json()["access_token"]
         return auth_headers(token)
+
+
+class TestAuditMetadata:
+    async def test_metadata_is_persisted(self, ma_user_id):
+        async with open_session() as db:
+            await audit_service.record(
+                db, action="UPLOAD_REJECTED", result=AuditResult.FAILURE,
+                actor_user_id=ma_user_id, metadata={"reason": "bad_magic"},
+            )
+        async with open_session() as db:
+            row = (await db.execute(select(AuditLog).where(AuditLog.action == "UPLOAD_REJECTED"))).scalar_one()
+        assert row.event_metadata == {"reason": "bad_magic"}
