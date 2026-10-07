@@ -42,6 +42,8 @@ jobs:
           pip install --force-reinstall --no-deps "opencv-python-headless>=4.10"
       - name: Lint
         run: ruff check app scripts tests e2e
+      - name: Type check
+        run: mypy
       - name: Tests
         run: pytest -q tests
 

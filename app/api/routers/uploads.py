@@ -163,7 +163,7 @@ async def review_rows(batch_id: uuid.UUID, actor: BatchViewer, db: DB):
         raise HTTPException(404, detail={"code": "not_found", "message": "Batch not found"})
     _assert_batch_visible(actor, batch)
 
-    stmt = (
+    rows_stmt = (
         select(ExtractedRow, UploadedFile.original_filename)
         .join(UploadedFile, UploadedFile.id == ExtractedRow.file_id)
         .where(
@@ -172,7 +172,7 @@ async def review_rows(batch_id: uuid.UUID, actor: BatchViewer, db: DB):
         )
         .order_by(UploadedFile.original_filename, ExtractedRow.row_index)
     )
-    rows = (await db.execute(stmt)).all()
+    rows = (await db.execute(rows_stmt)).all()
     return {
         "items": [
             {

@@ -124,6 +124,8 @@ async def process_uploaded_file(db: AsyncSession, file_id: uuid_mod.UUID) -> boo
     except Exception as exc:  # noqa: BLE001
         await db.rollback()
         file = await db.get(UploadedFile, file_id, populate_existing=True)
+        if file is None:
+            return False  # purged while it was being processed
         if isinstance(exc, OcrUnavailableError):
             # Engine missing, not a bad file: keep it retryable.
             file.status = FileStatus.PENDING_OCR

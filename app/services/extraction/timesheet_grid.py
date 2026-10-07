@@ -259,7 +259,7 @@ def _find_day_boxes(rgb: np.ndarray, threshold: int = 215) -> list[tuple[int, in
     gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
     binary = (gray < threshold).astype(np.uint8) * 255
     contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    rects = [cv2.boundingRect(c) for c in contours]
+    rects = [(x, y, w, h) for x, y, w, h in map(cv2.boundingRect, contours)]
     return [r for r in rects if 10 <= r[3] <= 120 and 12 <= r[2] <= 170
             and 1.0 <= r[2] / r[3] <= 2.2]
 
@@ -432,7 +432,7 @@ def _table_rulings(rgb, rows, cols, box_h, pitch):
     # that resampling smeared over two pixel rows
     hsmooth = cv2.erode(cv2.blur(gray, (9, 1)), np.ones((3, 1), np.uint8))
     vsmooth = cv2.erode(cv2.blur(gray, (1, 9)), np.ones((1, 3), np.uint8))
-    hmask = (hsmooth < thr).astype(np.uint8) * 255
+    hmask: np.ndarray = (hsmooth < thr).astype(np.uint8) * 255
     mask = (vsmooth < thr).astype(np.uint8) * 255
 
     hk = cv2.getStructuringElement(cv2.MORPH_RECT, (max(60, int((grid_x1 - grid_x0) * 0.3)), 1))
@@ -1039,11 +1039,11 @@ class _SheetReader:
             above = [y for y in hl if prev_bottom - 3 <= y <= y0 + 3]
             below = [y for y in hl if y1 - 3 <= y <= next_top + 3]
             if above:
-                top = above[-1]
+                top = float(above[-1])
             else:
                 top = (prev_bottom + y0) / 2 if i > 0 else y0 - 0.3 * h
             if below:
-                bottom = below[0]
+                bottom = float(below[0])
             else:
                 bottom = (y1 + next_top) / 2 if i + 1 < len(rows) else y1 + 0.3 * h
             bands.append((float(top), float(bottom)))
@@ -1189,14 +1189,19 @@ class _SheetReader:
         if tx1 - tx0 < 8:
             self.sheet.warnings.append("Total column not visible")
             return
-        regions = [(y0 - 2, y1 + 2, tx0, tx1) for y0, y1 in g.rows]
+        regions: list[tuple[float, float, int, int]] = [(y0 - 2, y1 + 2, tx0, tx1) for y0, y1 in g.rows]
         half = g.pitch / 2
         spans = [(int((a + b) / 2 - half + 1), int((a + b) / 2 + half - 1)) for a, b in g.cols]
         spans.append((tx0, tx1))
         bands = [(band, label) for band, label in zip(self.totals_bands, self.totals_labels, strict=True)
                  if label]
         seen: set[str] = set()
-        bands = [(b, lab) for b, lab in bands if not (lab in seen or seen.add(lab))]
+        unique = []
+        for band, lab in bands:   # first band of each label, in page order
+            if lab not in seen:
+                seen.add(lab)
+                unique.append((band, lab))
+        bands = unique
         for (by0, by1), _label in bands:
             regions.extend((by0, by1, xa, xb) for xa, xb in spans)
         values = self._read_numbers(regions)
@@ -1368,12 +1373,12 @@ class _SheetReader:
 
         # 1) one unknown in a row: the printed row total determines it
         for ln in lines:
-            unknown = [c for c in ln.cells if c.status != "EMPTY" and c.hours is None]
-            if len(unknown) == 1 and ln.printed_total is not None:
+            unread_cells = [c for c in ln.cells if c.status != "EMPTY" and c.hours is None]
+            if len(unread_cells) == 1 and ln.printed_total is not None:
                 rest = sum(c.hours for c in ln.cells if c.hours is not None)
                 val = round(ln.printed_total - rest, 2)
                 if 0 < val <= 24:
-                    set_cell(unknown[0], val, f"row {ln.row_index + 1} day {unknown[0].day} (row total)")
+                    set_cell(unread_cells[0], val, f"row {ln.row_index + 1} day {unread_cells[0].day} (row total)")
 
         # 2) per-day constraints from the totals rows
         for label, day_totals in s.totals.items():
@@ -1453,7 +1458,7 @@ class _SheetReader:
             })
         if not s.totals:
             s.warnings.append("totals rows not found — values could not be cross-checked")
-            checks.append({"check": "totals rows present", "expected": "NB/REG/Total rows",
+            checks.append({"check": "totals rows present", "expected": "per-type and grand total rows",
                            "actual": None, "ok": False})
         if not (s.year and s.month):
             checks.append({"check": "month and year readable", "expected": "period",

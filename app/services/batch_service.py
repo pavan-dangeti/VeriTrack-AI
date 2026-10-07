@@ -140,6 +140,8 @@ async def run_batch_processing(db: AsyncSession, batch_id: str) -> dict:
     if claimed is None:
         return {"status": "skipped"}  # missing, or another worker has it
     batch = await db.get(UploadBatch, bid)
+    if batch is None:
+        return {"status": "skipped"}  # purged after it was claimed
 
     stmt = (
         select(UploadedFile)
@@ -153,13 +155,14 @@ async def run_batch_processing(db: AsyncSession, batch_id: str) -> dict:
     for fid in file_ids:
         ok = await process_uploaded_file(db, fid)
         file = await db.get(UploadedFile, fid, populate_existing=True)
-        if file.status is FileStatus.PENDING_OCR:
+        status = file.status if file is not None else FileStatus.FAILED
+        if status is FileStatus.PENDING_OCR:
             pending += 1
-        elif ok or file.status is FileStatus.DONE:
+        elif ok or status is FileStatus.DONE:
             processed += 1
         else:
             failed += 1
-        batch = await db.get(UploadBatch, bid, populate_existing=True)
+        await db.refresh(batch)
         batch.processed_files = processed
         batch.failed_files = failed
         await db.commit()  # live progress for the polling endpoint
@@ -175,7 +178,6 @@ async def run_batch_processing(db: AsyncSession, batch_id: str) -> dict:
         from app.services.leave_service import import_leave_batch
 
         await import_leave_batch(db, batch)
-    batch = await db.get(UploadBatch, bid, populate_existing=True)
 
     await db.commit()
     log.info("batch_done", batch_id=batch_id, processed=processed, failed=failed, pending=pending)

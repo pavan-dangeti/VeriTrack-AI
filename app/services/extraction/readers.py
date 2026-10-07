@@ -122,7 +122,7 @@ def read_pdf_text_layer(data: bytes) -> list[RawTable]:
 def _lines_to_table(lines: list[str]) -> RawTable:
     """Heuristic: header is the first line with >=2 cells; delimiter sniffed."""
     delims = ["\t", "|", ";", ","]
-    best, best_count = ",", -1
+    best, best_count = ",", -1.0
     for d in delims:
         counts = [ln.count(d) for ln in lines[:20]]
         avg = sum(counts) / max(len(counts), 1)

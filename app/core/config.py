@@ -2,7 +2,7 @@
 
 from functools import lru_cache
 from pathlib import Path
-from typing import Annotated, Self
+from typing import Annotated, Literal, Self
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from pydantic import AliasChoices, BeforeValidator, Field, field_validator, model_validator
@@ -40,7 +40,7 @@ class Settings(BaseSettings):
 
     # strict: the SPA and API share an origin (Vercel rewrite / reverse proxy)
     # none:   the SPA calls the API cross-site (VITE_API_BASE_URL) — needs HTTPS
-    cookie_samesite: str = Field(default="strict", pattern="^(strict|lax|none)$")
+    cookie_samesite: Literal["strict", "lax", "none"] = "strict"
     # proxies in front of the API: 0 direct, 1 Render/nginx, 2 Vercel rewrite → Render
     trusted_proxy_hops: int = Field(default=1, ge=0, le=5)
 

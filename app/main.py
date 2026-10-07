@@ -60,7 +60,7 @@ class RequestContextLogMiddleware(BaseHTTPMiddleware):
         return response
 
 
-def _error(code: str, message: str, extra: dict[str, Any] | None = None) -> dict:
+def _error(code: str, message: str, extra: dict[str, Any] | list[Any] | None = None) -> dict:
     err: dict[str, Any] = {"code": code, "message": message}
     if extra:
         err["details"] = extra

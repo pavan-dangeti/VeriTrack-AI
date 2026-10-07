@@ -171,9 +171,10 @@ async def execute_analysis(db: AsyncSession, batch_id: str, triggered_by=None, r
     if run_id is None:
         run = await claim_analysis(db, batch, triggered_by)
     else:
-        run = await db.get(AnalysisRun, uuid.UUID(str(run_id)))
-        if run is None or run.status is not AnalysisStatus.RUNNING:
+        resumed = await db.get(AnalysisRun, uuid.UUID(str(run_id)))
+        if resumed is None or resumed.status is not AnalysisStatus.RUNNING:
             raise AnalyzeRuleError(409, "already_analyzed", "This batch was already analyzed")
+        run = resumed
         await db.execute(delete(ViolationResult).where(ViolationResult.run_id == run.id))
         await db.commit()
 

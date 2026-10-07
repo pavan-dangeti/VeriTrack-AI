@@ -55,14 +55,14 @@ def parse_date(value) -> date | None:
         return _safe(y + 2000 if y < 100 else y, mo, d)
     m = re.fullmatch(r"(\d{1,2})[\s\-/.]*([A-Za-z]{3,9})[\s\-/.,]*(\d{2,4})", text)
     if m:
-        d, mon, y = m.groups()
-        mo = _MONTHS.get(mon[:3].lower())
-        return _safe(int(y) + 2000 if len(y) == 2 else int(y), mo, int(d)) if mo else None
+        day, mon, year = m.groups()
+        month = _MONTHS.get(mon[:3].lower())
+        return _safe(int(year) + 2000 if len(year) == 2 else int(year), month, int(day)) if month else None
     m = re.fullmatch(r"([A-Za-z]{3,9})[\s\-/.]*(\d{1,2})[\s,\-/.]*(\d{4})", text)
     if m:
-        mon, d, y = m.groups()
-        mo = _MONTHS.get(mon[:3].lower())
-        return _safe(int(y), mo, int(d)) if mo else None
+        mon, day, year = m.groups()
+        month = _MONTHS.get(mon[:3].lower())
+        return _safe(int(year), month, int(day)) if month else None
     return None
 
 

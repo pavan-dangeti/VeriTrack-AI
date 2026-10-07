@@ -45,7 +45,8 @@ def _words(tok: dict) -> list[dict]:
             x1 = tok["x0"] + (tok["x1"] - tok["x0"]) * pos / n
             out.append({"text": p, "x0": x0, "x1": x1, "score": tok["score"]})
         return out
-    words, cur = [], []
+    words: list[list[tuple[str, float]]] = []
+    cur: list[tuple[str, float]] = []
     for ch, cx in chars:
         if ch == " ":
             if cur:
