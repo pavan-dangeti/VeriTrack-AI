@@ -624,6 +624,15 @@ def _parse_labels(chars: list[tuple[str, float]]) -> list[tuple[str, float, floa
     return out
 
 
+def _covers(token_box: tuple[float, ...], blob: tuple[float, ...]) -> bool:
+    """A detected token covers an ink blob when it spans at least half of the blob's height. Merely
+    touching is not enough: the lines of a wrapped cell sit a pixel or two apart, so a padded or
+    slightly tall token box can graze the line above it, which would hide a line the detector missed."""
+    tx0, ty0, tx1, ty1 = token_box
+    bx0, by0, bx1, by1 = blob
+    return min(tx1, bx1) > max(tx0, bx0) and min(ty1, by1) - max(ty0, by0) >= 0.5 * (by1 - by0)
+
+
 def _restore_spaces(tok: dict, gray: np.ndarray) -> None:
     """Re-inserts word spaces the recogniser dropped ('BillingAPI'): a blank
     pixel gap wider than ~0.22 em between two characters is a space."""
@@ -960,7 +969,7 @@ class _SheetReader:
         k = max(3, int(0.3 * g.box_h))
         merged = cv2.dilate(ink, cv2.getStructuringElement(cv2.MORPH_RECT, (k, 1)))
         n, _labels, stats, _ = cv2.connectedComponentsWithStats(merged, connectivity=8)
-        covered = [(t["x0"] - 3, t["y0"] - 3, t["x1"] + 3, t["y1"] + 3) for t in tokens]
+        boxes = [(t["x0"], t["y0"], t["x1"], t["y1"]) for t in tokens]
         found, crops = [], []
         for i in range(1, n):
             bx, by, bw, bh, _area = stats[i]
@@ -968,8 +977,8 @@ class _SheetReader:
             ax1, ay1 = ax0 + bw, ay0 + bh
             if not (0.3 * g.box_h <= bh <= 0.8 * g.box_h and bw >= 0.8 * g.box_h):
                 continue                                  # one text line only
-            if any(ax0 < c and a < ax1 and ay0 < d and b < ay1 for a, b, c, d in covered):
-                continue                                  # overlaps a detected token
+            if any(_covers(box, (ax0, ay0, ax1, ay1)) for box in boxes):
+                continue                                  # a detected token already holds this line
             found.append((ax0, ay0, ax1, ay1))
             crops.append(self.rgb[max(0, ay0 - 2):ay1 + 2, max(0, ax0 - 2):ax1 + 2])
         out = []

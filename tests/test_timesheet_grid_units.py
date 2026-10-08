@@ -10,6 +10,7 @@ from app.services.extraction.timesheet_grid import (
     SheetLine,
     _classify_fill,
     _clean_name,
+    _covers,
     _glyphs,
     _parse_labels,
     _SheetReader,
@@ -137,3 +138,11 @@ def test_ambiguous_weekday_header_does_not_guess_the_month():
     r._infer_period_from_weekdays()
     assert r.sheet.month is None and r.sheet.year is None
     assert any("several months" in w for w in r.sheet.warnings)
+
+
+def test_a_token_on_the_next_line_does_not_hide_a_missed_line():
+    # measured on CI's x86-64 rendering of a wrapped 'Out Of / Office' cell: the detector found only
+    # 'Office'; the 'Out Of' line above it sits 1 px from that token's box
+    office_token = (381, 245, 423, 266)
+    assert not _covers(office_token, (382, 234, 426, 244))   # 'Out Of' line: still recovered
+    assert _covers(office_token, (382, 251, 421, 261))       # 'Office' line: already read
