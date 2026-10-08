@@ -57,7 +57,9 @@ def test_distorted_sheet_is_exact_or_flagged(name):
     except SheetLayoutError:
         return  # refused outright: acceptable
     errors = score(sheet, TRUTH["synthetic_007.png"])
-    labels = ("employee_name", "supplier", "job_family", ".sub_project:")
+    # free text and approval statuses are informational (a grayscale capture has no status colours, and the
+    # reader says so); hours, totals, IDs and the period must never be verified-and-wrong
+    labels = ("employee_name", "supplier", "job_family", ".sub_project:", ".status:")
     numeric = [e for e in errors if not any(t in e for t in labels)]
     if sheet.status in ("VERIFIED", "CORRECTED"):
         assert not numeric, f"{name}: verified but wrong:\n" + "\n".join(numeric)

@@ -150,6 +150,8 @@ async def apply_correction(
         raise EmployeeRuleError(400, "bad_fields", f"Not editable: {sorted(unknown)}")
 
     current = await db.get(EmployeeVersion, employee.current_version_id)
+    if current is None:
+        raise RuntimeError(f"employee {employee.id} has no current version")
     values = {
         "full_name": current.full_name,
         "official_email": current.official_email,

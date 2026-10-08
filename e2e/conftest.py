@@ -86,8 +86,10 @@ def _dotenv() -> dict[str, str]:
 
 _ENV = _dotenv()
 # Explicit env vars win; the repo's .env seed values are a local-dev fallback.
-ADMIN_EMAIL = os.environ.get("E2E_ADMIN_EMAIL") or _ENV.get("SEED_ADMIN_EMAIL", "")
-ADMIN_PASSWORD = os.environ.get("E2E_ADMIN_PASSWORD") or _ENV.get("SEED_ADMIN_PASSWORD", "")
+ADMIN_EMAIL = os.environ.get("E2E_ADMIN_EMAIL") or _ENV.get("ADMIN_EMAIL") or _ENV.get("SEED_ADMIN_EMAIL", "")
+ADMIN_PASSWORD = (
+    os.environ.get("E2E_ADMIN_PASSWORD") or _ENV.get("ADMIN_PASSWORD") or _ENV.get("SEED_ADMIN_PASSWORD", "")
+)
 
 ACCOUNTS: dict[str, dict[str, str]] = {}
 FACTS: dict[str, object] = {}
@@ -101,7 +103,7 @@ def _probe() -> str | None:
     import urllib.request
 
     if not ADMIN_EMAIL or not ADMIN_PASSWORD:
-        return "E2E_ADMIN_EMAIL / E2E_ADMIN_PASSWORD not set (and no SEED_ADMIN_* in .env)"
+        return "E2E_ADMIN_EMAIL / E2E_ADMIN_PASSWORD not set (and no ADMIN_* in .env)"
     try:
         urllib.request.urlopen(BASE_URL + "/", timeout=5).read(1)  # noqa: S310
     except Exception as exc:  # noqa: BLE001

@@ -20,6 +20,9 @@ ACTION_ENABLE_USER = "ENABLE_USER"
 ACTION_DISABLE_USER = "DISABLE_USER"
 ACTION_RBAC_DENIED = "RBAC_DENIED"
 ACTION_BOOTSTRAP_ADMIN = "BOOTSTRAP_MASTER_ADMIN"
+ACTION_ADMIN_CREDENTIALS_SYNCED = "ADMIN_CREDENTIALS_SYNCED"
+ACTION_DEMO_RESET = "DEMO_RESET"
+ACTION_DEMO_ACCOUNT_CREATED = "DEMO_ACCOUNT_CREATED"
 
 
 async def record(
@@ -42,7 +45,7 @@ async def record(
         ip_address=ip_address,
         user_agent=user_agent,
         result=result,
-        metadata=metadata,
+        event_metadata=metadata,
     )
     db.add(entry)
     await db.commit()

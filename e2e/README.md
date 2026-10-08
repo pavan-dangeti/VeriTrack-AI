@@ -15,7 +15,7 @@ and the pyproject pytest settings are never loaded (and vice versa).
 1. PostgreSQL up, migrations applied, Master Admin seeded
    (`python -m app.cli create-master-admin --if-not-exists`).
 2. Backend on :8000 — `uvicorn app.main:app --port 8000`
-   (`PROCESSING_MODE=background`, RapidOCR installed for real Timesheet extraction).
+   (`PROCESSING_MODE=background`, RapidOCR installed for real timesheet extraction).
 3. Frontend on :5173 — `cd frontend && npx vite --port 5173` (proxies `/api`).
 4. Playwright's Chromium: `playwright install chromium` (or point `E2E_CHROMIUM` at a Chrome/Chromium binary).
 
@@ -30,7 +30,7 @@ export E2E_ADMIN_PASSWORD='…'          # the seeded Master Admin password
 | Variable | Default | Meaning |
 |---|---|---|
 | `E2E_BASE_URL` | `http://localhost:5173` | Frontend URL (API reached through its `/api` proxy) |
-| `E2E_ADMIN_EMAIL` / `E2E_ADMIN_PASSWORD` | `SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD` from the repo `.env` | Master Admin login |
+| `E2E_ADMIN_EMAIL` / `E2E_ADMIN_PASSWORD` | `ADMIN_EMAIL` / `ADMIN_PASSWORD` from the repo `.env` | Master Admin login |
 | `E2E_SHOTS_DIR` | `e2e/.artifacts` (git-ignored) | Screenshots (one per page per role) + every downloaded file |
 | `E2E_CHROMIUM` | Playwright's Chromium | Chromium executable |
 | `E2E_HEADED` | unset | set to `1` to watch the browser |
@@ -67,7 +67,7 @@ while it ran, any page produced:
 | `test_05_hr.py` | HR first login, every page, CSV/XLSX downloads, read-only leave register, blocked URLs |
 | `test_06_executive.py` | every page, analytics, repositories, reports + results, directory → manager → HR → manager drill-down, blocked URLs |
 | `test_07_shell.py` | sidebar collapse persistence, dark/light persistence, Ctrl+K palette (keys + mouse), unknown routes, 390×844 mobile drawer + no horizontal scroll |
-| `test_08_negative.py` | .txt / fake .png / empty / 21-file uploads rejected with a toast, garbage repository file, non-Timesheet image, bad drill-down URLs, rapid navigation |
+| `test_08_negative.py` | .txt / fake .png / empty / 21-file uploads rejected with a toast, garbage repository file, non-timesheet image, bad drill-down URLs, rapid navigation |
 | `test_09_resend.py` | "Resend" reports, then downloads still work (runs last) |
 
 Modules can be run on their own (`pytest e2e/test_05_hr.py`); accounts and

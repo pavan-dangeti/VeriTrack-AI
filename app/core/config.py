@@ -2,9 +2,10 @@
 
 from functools import lru_cache
 from pathlib import Path
-from typing import Annotated, Self
+from typing import Annotated, Literal, Self
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-from pydantic import BeforeValidator, Field, field_validator, model_validator
+from pydantic import AliasChoices, BeforeValidator, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
@@ -39,7 +40,7 @@ class Settings(BaseSettings):
 
     # strict: the SPA and API share an origin (Vercel rewrite / reverse proxy)
     # none:   the SPA calls the API cross-site (VITE_API_BASE_URL) — needs HTTPS
-    cookie_samesite: str = Field(default="strict", pattern="^(strict|lax|none)$")
+    cookie_samesite: Literal["strict", "lax", "none"] = "strict"
     # proxies in front of the API: 0 direct, 1 Render/nginx, 2 Vercel rewrite → Render
     trusted_proxy_hops: int = Field(default=1, ge=0, le=5)
 
@@ -53,9 +54,15 @@ class Settings(BaseSettings):
     m365_tenant_id: str = "common"
     m365_redirect_uri: str = "http://localhost:8000/api/v1/auth/m365/callback"
 
-    seed_admin_email: str = "admin@veritrack.io"
-    # No default: without SEED_ADMIN_PASSWORD or --password the CLI generates one and prints it once.
-    seed_admin_password: str | None = None
+    # The Master Admin is synced from these at startup (SEED_ADMIN_* are the older names).
+    admin_email: str = Field(default="admin@veritrack.io",
+                             validation_alias=AliasChoices("ADMIN_EMAIL", "SEED_ADMIN_EMAIL"))
+    admin_password: str | None = Field(default=None,
+                                       validation_alias=AliasChoices("ADMIN_PASSWORD", "SEED_ADMIN_PASSWORD"))
+    # optional public demo Manager (synthetic data only, reset every demo_reset_hours)
+    demo_email: str | None = None
+    demo_password: str | None = None
+    demo_reset_hours: int = Field(default=24, ge=1)
 
     # local  — filesystem, development only
     # volume — filesystem on a persistent disk (allowed in production)
@@ -133,14 +140,28 @@ class Settings(BaseSettings):
     @field_validator("database_url", mode="before")
     @classmethod
     def _asyncpg_url(cls, value):
-        """Accept the URLs hosting providers hand out (postgres://…,
-        postgresql://…?sslmode=require) and route them through asyncpg."""
+        """Accept the URLs hosting providers hand out (postgres://…, ?sslmode=require,
+        Neon's &channel_binding=require) and route them through asyncpg."""
         if not isinstance(value, str):
             return value
         for prefix in ("postgres://", "postgresql://"):
             if value.startswith(prefix):
                 value = "postgresql+asyncpg://" + value[len(prefix):]
-        return value.replace("sslmode=require", "ssl=require")
+        url = urlsplit(value)
+        # asyncpg names the option ssl and has no channel_binding argument (SCRAM is negotiated anyway)
+        query = [("ssl" if k == "sslmode" else k, v) for k, v in parse_qsl(url.query) if k != "channel_binding"]
+        return urlunsplit(url._replace(query=urlencode(query)))
+
+    @property
+    def database_uses_tls(self) -> bool:
+        ssl = dict(parse_qsl(urlsplit(self.database_url).query)).get("ssl", "")
+        return ssl in {"require", "verify-ca", "verify-full"}
+
+    @property
+    def database_is_private(self) -> bool:
+        """Loopback or a single-label host (a docker-compose service name) never leaves the machine."""
+        host = urlsplit(self.database_url).hostname or ""
+        return host in {"localhost", "127.0.0.1", "::1"} or "." not in host
 
     @model_validator(mode="after")
     def validate_secrets(self) -> Self:
@@ -154,6 +175,11 @@ class Settings(BaseSettings):
             wildcard = {o for o in self.cors_origins if "*" in o}
             if wildcard:
                 raise ValueError("CORS_ORIGINS must not contain wildcards in production")
+            if not (self.database_uses_tls or self.database_is_private):
+                raise ValueError("DATABASE_URL must use TLS in production (add ?sslmode=require)")
+        if "-pooler." in (urlsplit(self.database_url).hostname or ""):
+            # PgBouncer transaction pooling breaks asyncpg's prepared statements
+            raise ValueError("DATABASE_URL points at a Neon pooled endpoint; use the direct connection string")
         if not self.jwt_secret_key:
             if self.environment != "development":
                 raise ValueError("JWT_SECRET_KEY is required outside development")

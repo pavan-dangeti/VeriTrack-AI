@@ -114,7 +114,7 @@ async def manager_flow(base: str, stats: Stats, email: str, password: str, i: in
     sheet = list(SHEETS)[i % len(SHEETS)]
     data = (SYNTHETIC / sheet).read_bytes()
     t0 = time.perf_counter()
-    batch = (await u.call("upload_timesheet", "POST", "/api/v1/uploads?kind=TIMESHEET", 201,
+    batch = (await u.call("upload_timesheets", "POST", "/api/v1/uploads?kind=TIMESHEET", 201,
                           files=[("files", (sheet, data, "image/png"))])).json()
     while True:
         detail = (await u.call("poll_batch", "GET", f"/api/v1/uploads/batches/{batch['id']}")).json()

@@ -66,7 +66,7 @@ export function LeaveRegisterPage() {
       <PageHeader
         eyebrow="Workspace"
         title="Company Leave Register"
-        subtitle="Company-side leave records. Every Timesheet 'Out Of Office' day must have a matching entry here, or analysis flags it."
+        subtitle="Company-side leave records. Every timesheet 'Out Of Office' day must have a matching entry here, or analysis flags it."
         actions={canEdit && <Button icon={CalendarPlus} onClick={() => setAdding(true)} data-testid="add-leave">Add leave</Button>}
       />
 

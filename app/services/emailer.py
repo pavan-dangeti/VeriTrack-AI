@@ -105,7 +105,11 @@ async def dispatch_violation_emails(
     )
     violations = (await db.execute(stmt)).scalars().unique().all()
 
-    live = settings.outbound_email_mode == "live" and settings.graph_enabled
+    from app.models.user import User
+    from app.services import demo_service
+
+    live = (settings.outbound_email_mode == "live" and settings.graph_enabled
+            and not demo_service.is_demo(await db.get(User, run.manager_id)))   # the public demo never emails
     sender = GraphClient() if live else None
 
     sent = errored = 0

@@ -14,7 +14,7 @@ the sheet's own totals, and flags any customer-side leave that is missing from t
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1?style=flat-square&logo=postgresql&logoColor=white)
 ![React](https://img.shields.io/badge/React-19-20232A?style=flat-square&logo=react&logoColor=61DAFB)
 ![TypeScript](https://img.shields.io/badge/TypeScript-6-3178C6?style=flat-square&logo=typescript&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-380%20passing-2ea44f?style=flat-square)
+[![CI](https://github.com/pavan-dangeti/VeriTrack-AI/actions/workflows/ci.yml/badge.svg)](https://github.com/pavan-dangeti/VeriTrack-AI/actions/workflows/ci.yml)
 ![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)
 
 <img src="docs/media/demo.gif" alt="Upload four timesheet screenshots, watch them get verified, review one sheet and run the leave analysis" width="900" />
@@ -36,8 +36,8 @@ Full-quality video: <a href="docs/media/demo.mp4">docs/media/demo.mp4</a></sub>
 
 ## Why
 
-Every month, managers collect screenshots of each engineer's **Timesheet** timesheet and check by hand that each
-*Out Of Office* day booked with the customer also exists in the company's internal leave register. It is
+Every month, managers collect screenshots of each consultant's client-side timesheet and check by hand that
+each *Out Of Office* day booked there also exists in the company's own leave register. It is
 slow, error-prone, and one misread digit sends the wrong email.
 
 VeriTrack automates the whole loop and is built around one rule: **a number that cannot be proven is never
@@ -152,12 +152,12 @@ OCR suites use synthetic sheets with invented people and projects, rendered on d
 
 | Suite | What it proves | Result |
 |---|---|---|
-| **Backend** (`pytest tests`) | API, auth, rules, OCR, concurrency, recovery, exports, migrations | **283 passed** |
+| **Backend** (`pytest tests`) | API, auth, rules, OCR, concurrency, recovery, exports, migrations | **303 passed** |
 | &nbsp;&nbsp;OCR accuracy | 16 synthetic sheets (28–31-day months, 1–9 projects, 4 fonts, 90–150 % zoom) read field-for-field | **16/16 exact** |
 | &nbsp;&nbsp;Capture conditions | 4 sheets × 7 degradations (80–200 % zoom, JPEG q60, blur, noise): every hour, total, status, ID and period | **28/28 exact** |
 | &nbsp;&nbsp;Hostile inputs | cropped totals, cut-off columns, rotation, grayscale, tiny, padded: exact *or* flagged — never verified-and-wrong | **7/7** |
 | &nbsp;&nbsp;Permission matrix | all 42 endpoints × 4 roles + anonymous; cross-manager access to every object type | **0 leaks** |
-| **Frontend** (`npm test`) | pages, guards, flows, shell | **49 passed** |
+| **Frontend** (`npm test`) | pages, guards, flows, shell | **56 passed** |
 | **End-to-end** (`pytest e2e`, real Chromium) | every page and button for all four roles, uploads, downloads, dark mode, palette, mobile, negative paths; fails on any console error or 5xx | **48 passed**, stable across consecutive runs, also against the production build |
 | **Load** (`scripts/load_test.py`, production mode, 2 vCPU) | 50 concurrent users: 40 managers upload → OCR → analyse while 10 HR users browse continuously | **40/40 results correct, 0 errors, 0 cross-user leaks** |
 
@@ -167,11 +167,12 @@ Latency during the load test (≈ 38 000 requests, OCR saturating the CPU the wh
 |---|---|---|
 | Dashboard / lists | 23–30 ms | 82–114 ms |
 | Analysis trigger / result | 27–30 ms | 133–273 ms |
-| timesheet upload (stored + queued) | 0.54 s | 2.1 s |
+| Timesheet upload (stored + queued) | 0.54 s | 2.1 s |
 | Login, 50 users in the same second | 7 s | 10.5 s |
 
 The login burst is bcrypt (cost 12) competing for 2 vCPUs — deliberate slowness that protects passwords; it
 scales with CPU count and is a one-off per session (sessions refresh silently for 7 days).
+
 
 ## Getting started
 
@@ -180,7 +181,7 @@ scales with CPU count and is a one-off per session (sessions refresh silently fo
 ```bash
 # backend
 python -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
-cp .env.example .env                        # set SEED_ADMIN_PASSWORD
+cp .env.example .env                        # set ADMIN_PASSWORD
 createdb veritrack                          # or: docker compose up -d db
 .venv/bin/alembic upgrade head
 .venv/bin/python -m app.cli create-master-admin
@@ -214,7 +215,7 @@ All settings are environment variables (see [`.env.example`](.env.example)); pro
 Frontend on **Vercel**, API + PostgreSQL on **Render** — step by step in [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 
 1. Render → **New → Blueprint** → this repository (`render.yaml` creates the API, the database and a disk).
-   Set `SEED_ADMIN_EMAIL`, `SEED_ADMIN_PASSWORD`, `CORS_ORIGINS`.
+   Set `ADMIN_EMAIL`, `ADMIN_PASSWORD`, `CORS_ORIGINS`.
 2. Put the Render URL into [`vercel.json`](vercel.json) (`rewrites`).
 3. Vercel → **Import** this repository (root directory = repository root).
 
@@ -278,7 +279,7 @@ docs/                 deployment guide, screenshots, demo video
 
 ## Known limitations
 
-- The timesheet reader is specialised for the Timesheet *Time Sheet* page; other scans go through a generic table reader
+- The timesheet reader is tuned to one timesheet layout (the one `scripts/gen_synthetic_timesheets.py` renders); other scans go through a generic table reader
   and are flagged for review more often.
 - Free-text labels (names, sub-project titles) can pick up small OCR slips on heavily degraded images; they are
   informational — the leave rule keys on person ID, hour type and dates, which are verified.

@@ -150,7 +150,7 @@ async def export_batch(
         fixed = ["employee_code", "full_name", "supplier", "job_family", "hour_type",
                  "project_id", "project_name", "task_id", "remarks"]
         day_cols = [f"day_{d:02d}" for d in range(1, 32)]
-        tail = [c for c in ("total", "period") if c in extras_keys]
+        tail: list[str] = [c for c in ("total", "period") if c in extras_keys]
         tail += sorted(c for c in extras_keys if c.endswith(" leave"))
         columns_out = fixed + day_cols + tail
     else:
@@ -202,6 +202,8 @@ async def download_report(request: Request, run_id: uuid.UUID, kind: str, actor:
         raise HTTPException(404, detail={"code": "not_found", "message": "Report not generated"})
 
     run = await db.get(AnalysisRun, run_id)
+    if run is None:
+        raise HTTPException(404, detail={"code": "not_found", "message": "Analysis run not found"})
     if actor.role is UserRole.MANAGER and run.manager_id != actor.id:
         raise HTTPException(403, detail={"code": "forbidden", "message": "Not your report"})
 

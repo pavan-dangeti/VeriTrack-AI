@@ -33,6 +33,10 @@ MasterAdminOnly = Annotated[User, Depends(require_role(UserRole.MASTER_ADMIN))]
 
 @router.post("", response_model=UserCreatedOut, status_code=201)
 async def create_user(body: UserCreate, actor: Creator, db: DB):
+    from app.services import demo_service
+
+    if demo_service.is_demo(actor):
+        raise HTTPException(403, detail={"code": "demo_account", "message": "The demo account cannot create users"})
     try:
         user, initial_password = await user_service.create_user(
             db, creator=actor, email=body.email, role=body.role,

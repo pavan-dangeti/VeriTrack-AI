@@ -1,4 +1,4 @@
-"""Analysis orchestration: run the Timesheet rules over a batch, persist deduped violations, email, report."""
+"""Analysis orchestration: run the timesheet rules over a batch, persist deduped violations, email, report."""
 
 import uuid
 from datetime import UTC, datetime
@@ -125,7 +125,7 @@ async def _analyze_timesheets(db, run, batch, rows, repo, counts, skip_log, seen
             email_to=email_to,
             email_status=EmailStatus.PENDING if email_to else EmailStatus.SKIPPED_NO_EMAIL,
             details={
-                "source": "TIMESHEET_TIMESHEET",
+                "source": "TIMESHEET",
                 "periods": sorted(e["periods"]),
                 "customer_leave_dates": [d.isoformat() for d in sorted(e["dates"])],
                 "missing_in_register": [d.isoformat() for d in missing],
@@ -171,9 +171,10 @@ async def execute_analysis(db: AsyncSession, batch_id: str, triggered_by=None, r
     if run_id is None:
         run = await claim_analysis(db, batch, triggered_by)
     else:
-        run = await db.get(AnalysisRun, uuid.UUID(str(run_id)))
-        if run is None or run.status is not AnalysisStatus.RUNNING:
+        resumed = await db.get(AnalysisRun, uuid.UUID(str(run_id)))
+        if resumed is None or resumed.status is not AnalysisStatus.RUNNING:
             raise AnalyzeRuleError(409, "already_analyzed", "This batch was already analyzed")
+        run = resumed
         await db.execute(delete(ViolationResult).where(ViolationResult.run_id == run.id))
         await db.commit()
 

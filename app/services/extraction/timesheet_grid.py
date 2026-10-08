@@ -25,19 +25,17 @@ MONTHS = {name.lower(): i for i, name in enumerate(calendar.month_name) if name}
 WEEKDAYS = ("Mo", "Tu", "We", "Th", "Fr", "Sa", "Su")
 
 TEXT_COLUMNS: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("select", ("select",)),
-    ("person_id", ("person id",)),
-    ("supplier", ("supplier",)),
-    ("job_family", ("billable job family", "job family")),
-    ("uom", ("uom",)),
-    ("project_id", ("project id",)),
-    ("sub_project", ("sub project",)),
-    ("sub_project_id", ("sub project id",)),
-    ("remarks", ("remarks",)),
+    ("person_id", ("employee id",)),
+    ("supplier", ("client",)),
+    ("job_family", ("role",)),
+    ("uom", ("type",)),
+    ("project_id", ("project code",)),
+    ("sub_project", ("task",)),
+    ("sub_project_id", ("task code",)),
+    ("remarks", ("notes",)),
 )
-# "Employee, NAME" — tolerant of OCR slips like 'G00d Day' / 'Good Dav'
-_GREETING = re.compile(r"g\W?[o0]{1,2}\W?d\s*d\W?[a@4]\W?[yv]\s*[,.:;]?\s*(.+)$", re.IGNORECASE)
-_GREETING_ONLY = re.compile(r"g\W?[o0]{1,2}\W?d\s*d\W?[a@4]\W?[yv]\s*[,.:;]?", re.IGNORECASE)
+# "Employee  NAME" in the page header — tolerant of OCR slips like 'Emp1oyee' / 'Employe'
+_EMPLOYEE = re.compile(r"^\s*emp[l1i]oye{1,2}\s*[,.:;]?\s*(.*)$", re.IGNORECASE)
 SPLIT_SCORE = 0.8499  # marker confidence for text split across columns by char position
 _LABELS = sorted(
     ((key, alias.replace(" ", "")) for key, aliases in TEXT_COLUMNS for alias in aliases),
@@ -52,7 +50,7 @@ class SheetLayoutError(Exception):
 class SheetCell:
     day: int
     hours: float | None
-    status: str  # EMPTY | SUBMITTED | APPROVED | REVIEWED | PLANNED | FILLED
+    status: str  # EMPTY | DRAFT | SUBMITTED | APPROVED | REJECTED | FILLED
     raw: str = ""
     confidence: float = 1.0
     corrected: bool = False
@@ -257,11 +255,11 @@ class _Ocr:
         return [(_ascii(str(t)), float(s)) for t, s in results]
 
 
-def _find_day_boxes(rgb: np.ndarray) -> list[tuple[int, int, int, int]]:
+def _find_day_boxes(rgb: np.ndarray, threshold: int = 215) -> list[tuple[int, int, int, int]]:
     gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
-    binary = (gray < 215).astype(np.uint8) * 255
+    binary = (gray < threshold).astype(np.uint8) * 255
     contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    rects = [cv2.boundingRect(c) for c in contours]
+    rects = [(x, y, w, h) for x, y, w, h in map(cv2.boundingRect, contours)]
     return [r for r in rects if 10 <= r[3] <= 120 and 12 <= r[2] <= 170
             and 1.0 <= r[2] / r[3] <= 2.2]
 
@@ -336,7 +334,13 @@ def _box_lattice(rgb: np.ndarray):
     """Day-box lattice, or None. Page chrome also yields box-like contours
     (glyphs, checkboxes, buttons), so the day boxes are identified as the
     size cluster that lines up into rows of ≥20 evenly pitched boxes."""
-    rects = _find_day_boxes(rgb)
+    lattice = _box_lattice_at(rgb, 215)
+    # blur or downscaling can lift thin 1-px box borders above the default threshold
+    return lattice if lattice is not None else _box_lattice_at(rgb, 228)
+
+
+def _box_lattice_at(rgb: np.ndarray, threshold: int):
+    rects = _find_day_boxes(rgb, threshold)
     if len(rects) < 20:
         return None
     bins: dict[tuple[int, int], int] = {}
@@ -428,7 +432,7 @@ def _table_rulings(rgb, rows, cols, box_h, pitch):
     # that resampling smeared over two pixel rows
     hsmooth = cv2.erode(cv2.blur(gray, (9, 1)), np.ones((3, 1), np.uint8))
     vsmooth = cv2.erode(cv2.blur(gray, (1, 9)), np.ones((1, 3), np.uint8))
-    hmask = (hsmooth < thr).astype(np.uint8) * 255
+    hmask: np.ndarray = (hsmooth < thr).astype(np.uint8) * 255
     mask = (vsmooth < thr).astype(np.uint8) * 255
 
     hk = cv2.getStructuringElement(cv2.MORPH_RECT, (max(60, int((grid_x1 - grid_x0) * 0.3)), 1))
@@ -464,7 +468,7 @@ def _table_rulings(rgb, rows, cols, box_h, pitch):
     for x in _run_centres([int(x) for x in np.where(band.sum(0) > 0)[0]]):
         runs = _runs(vmask[:, x] > 0)
         run = next(((a, b) for a, b in runs if a <= grid_y0 + 1 <= b), None)
-        # column rulings run up through the header; dropdown/box edges don't
+        # column rulings run up through the header; box and button edges don't
         if run is None or run[0] > grid_y0 - 0.5 * box_h:
             continue
         vlines.append(x)
@@ -495,20 +499,18 @@ def _table_rulings(rgb, rows, cols, box_h, pitch):
 
 def _classify_fill(rgb_color) -> str:
     r, g, b = (float(v) for v in rgb_color)
-    hsv = cv2.cvtColor(np.uint8([[[r, g, b]]]), cv2.COLOR_RGB2HSV)[0, 0]
+    hsv = cv2.cvtColor(np.array([[[r, g, b]]], dtype=np.uint8), cv2.COLOR_RGB2HSV)[0, 0]
     hue, sat, val = int(hsv[0]) * 2, int(hsv[1]), int(hsv[2])
     if sat > 90 and val > 60:
-        if hue >= 280 or hue <= 20:
-            return "SUBMITTED"   # magenta / crimson
-        if 190 <= hue < 280:
-            return "PLANNED"       # blue
-        if 20 < hue <= 75:
-            return "APPROVED"
+        if hue >= 330 or hue <= 15:
+            return "REJECTED"      # red
+        if 15 < hue <= 70:
+            return "SUBMITTED"     # amber
+        if 90 <= hue <= 170:
+            return "APPROVED"      # green
         return "FILLED"
-    if sat > 20 and 30 <= hue <= 75 and val > 200:
-        return "APPROVED"       # pale yellow
     if sat <= 20 and val < 246:
-        return "REVIEWED"       # light grey
+        return "DRAFT"             # light slate
     return "EMPTY"
 
 
@@ -622,6 +624,15 @@ def _parse_labels(chars: list[tuple[str, float]]) -> list[tuple[str, float, floa
     return out
 
 
+def _covers(token_box: tuple[float, ...], blob: tuple[float, ...]) -> bool:
+    """A detected token covers an ink blob when it spans at least half of the blob's height. Merely
+    touching is not enough: the lines of a wrapped cell sit a pixel or two apart, so a padded or
+    slightly tall token box can graze the line above it, which would hide a line the detector missed."""
+    tx0, ty0, tx1, ty1 = token_box
+    bx0, by0, bx1, by1 = blob
+    return min(tx1, bx1) > max(tx0, bx0) and min(ty1, by1) - max(ty0, by0) >= 0.5 * (by1 - by0)
+
+
 def _restore_spaces(tok: dict, gray: np.ndarray) -> None:
     """Re-inserts word spaces the recogniser dropped ('BillingAPI'): a blank
     pixel gap wider than ~0.22 em between two characters is a space."""
@@ -656,8 +667,8 @@ def _restore_spaces(tok: dict, gray: np.ndarray) -> None:
         joinable = ch not in "_-/." and prev not in "_-/." and not (ch.isdigit() and prev.isdigit())
         if i and ch != " " and prev != " " and joinable:
             prev_cx = rebuilt[-1][1]
-            both_upper = prev.isupper() and ch.isupper()
-            if any(prev_cx < (a + b) / 2 < cx and (st or not both_upper) for a, b, st in gaps):
+            case_change = prev.islower() and ch.isupper()
+            if any(prev_cx < (a + b) / 2 < cx and (st or case_change) for a, b, st in gaps):
                 rebuilt.append((" ", (prev_cx + cx) / 2))
         rebuilt.append((ch, cx))
     if len(rebuilt) != len(chars):
@@ -861,7 +872,20 @@ class _SheetReader:
             if i + 1 < len(ordered) and ordered[i + 1][3] == a:
                 right = (lx1 + ordered[i + 1][1]) / 2
             out.append((key, float(left), float(right)))
-        return out
+        # A header word the detector missed leaves its ruling span unlabelled; the column order is fixed,
+        # so a span between two labelled columns that are one column apart takes the column between them.
+        keys = [k for k, _ in TEXT_COLUMNS]
+        labelled = {(item[3], item[4]) for item in ordered}
+        for a, b in spans:
+            if (a, b) in labelled:
+                continue
+            before = [c for c in out if c[2] <= a + 1]
+            after = [c for c in out if c[1] >= b - 1]
+            if before and after:
+                i, j = keys.index(before[-1][0]), keys.index(after[0][0])
+                if j - i == 2:
+                    out.append((keys[i + 1], float(a), float(b)))
+        return sorted(out, key=lambda c: c[1])
 
     @staticmethod
     def _cells_from_tokens(tokens, columns) -> dict[str, tuple[str, float]]:
@@ -945,7 +969,7 @@ class _SheetReader:
         k = max(3, int(0.3 * g.box_h))
         merged = cv2.dilate(ink, cv2.getStructuringElement(cv2.MORPH_RECT, (k, 1)))
         n, _labels, stats, _ = cv2.connectedComponentsWithStats(merged, connectivity=8)
-        covered = [(t["x0"] - 3, t["y0"] - 3, t["x1"] + 3, t["y1"] + 3) for t in tokens]
+        boxes = [(t["x0"], t["y0"], t["x1"], t["y1"]) for t in tokens]
         found, crops = [], []
         for i in range(1, n):
             bx, by, bw, bh, _area = stats[i]
@@ -953,8 +977,8 @@ class _SheetReader:
             ax1, ay1 = ax0 + bw, ay0 + bh
             if not (0.3 * g.box_h <= bh <= 0.8 * g.box_h and bw >= 0.8 * g.box_h):
                 continue                                  # one text line only
-            if any(ax0 < c and a < ax1 and ay0 < d and b < ay1 for a, b, c, d in covered):
-                continue                                  # overlaps a detected token
+            if any(_covers(box, (ax0, ay0, ax1, ay1)) for box in boxes):
+                continue                                  # a detected token already holds this line
             found.append((ax0, ay0, ax1, ay1))
             crops.append(self.rgb[max(0, ay0 - 2):ay1 + 2, max(0, ax0 - 2):ax1 + 2])
         out = []
@@ -1024,11 +1048,11 @@ class _SheetReader:
             above = [y for y in hl if prev_bottom - 3 <= y <= y0 + 3]
             below = [y for y in hl if y1 - 3 <= y <= next_top + 3]
             if above:
-                top = above[-1]
+                top = float(above[-1])
             else:
                 top = (prev_bottom + y0) / 2 if i > 0 else y0 - 0.3 * h
             if below:
-                bottom = below[0]
+                bottom = float(below[0])
             else:
                 bottom = (y1 + next_top) / 2 if i + 1 < len(rows) else y1 + 0.3 * h
             bands.append((float(top), float(bottom)))
@@ -1041,12 +1065,9 @@ class _SheetReader:
         line.supplier = supplier.strip()
         job = re.sub(r"\s+", " ", values.get("job_family", "")).strip()
         job = " ".join(w for i, w in enumerate(job.split()) if not (len(w) == 1 and w.isalpha() and i == 0))
+        job = re.sub(r"(?<=[a-z])(?=[A-Z])", " ", job)   # role titles are never CamelCase: a lost space
         line.job_family = re.sub(r"\s*-\s*", " - ", job).strip(" -")
         uom = re.sub(r"[^A-Za-z]", "", values.get("uom", "")).upper()
-        if uom.endswith("V") and len(uom) > 2:   # dropdown chevron read as 'V'
-            uom = uom[:-1]
-        if uom.startswith("V") and len(uom) > 2:
-            uom = uom[1:]
         line.uom = uom
         line.project_id = re.sub(r"\D", "", values.get("project_id", ""))
         sub = re.sub(r"\s+", " ", values.get("sub_project", "")).strip()
@@ -1054,7 +1075,7 @@ class _SheetReader:
         sub = re.sub(r"(?<=[A-Za-z])[.,:;'`](?=\s)", "", sub)   # stray recogniser dots
         sub = re.sub(r"[\s\-:;.,_~]+$", "", sub)
         if _fuzzy(_norm(sub), "outofoffice") >= 0.85:
-            sub = "Out Of Office"          # the sheet's canonical leave project
+            sub = "Out Of Office"          # the sheet's leave project
         line.sub_project = sub
         line.sub_project_id = re.sub(r"\D", "", values.get("sub_project_id", ""))
         line.remarks = values.get("remarks", "").strip()
@@ -1087,10 +1108,10 @@ class _SheetReader:
         if not toks:
             return ""
         full = _norm(" ".join(t["text"] for t in toks))
-        last = toks[-1]["text"].strip()
-        if full in ("total", "totals") or _norm(last) == "total":
+        if full.endswith(("total", "totals")):
             return "TOTAL"
-        m = re.search(r"([A-Za-z]{2,4})\s*$", last)
+        # "Total REG", also when the recogniser joins it into one word ("TotalREG")
+        m = re.search(r"([a-z]{2,4})$", re.sub(r"^.*?totals?", "", full))
         return m.group(1).upper() if m else ""
 
     # ---- day cells -------------------------------------------------------------
@@ -1178,14 +1199,19 @@ class _SheetReader:
         if tx1 - tx0 < 8:
             self.sheet.warnings.append("Total column not visible")
             return
-        regions = [(y0 - 2, y1 + 2, tx0, tx1) for y0, y1 in g.rows]
+        regions: list[tuple[float, float, int, int]] = [(y0 - 2, y1 + 2, tx0, tx1) for y0, y1 in g.rows]
         half = g.pitch / 2
         spans = [(int((a + b) / 2 - half + 1), int((a + b) / 2 + half - 1)) for a, b in g.cols]
         spans.append((tx0, tx1))
         bands = [(band, label) for band, label in zip(self.totals_bands, self.totals_labels, strict=True)
                  if label]
         seen: set[str] = set()
-        bands = [(b, lab) for b, lab in bands if not (lab in seen or seen.add(lab))]
+        unique = []
+        for band, lab in bands:   # first band of each label, in page order
+            if lab not in seen:
+                seen.add(lab)
+                unique.append((band, lab))
+        bands = unique
         for (by0, by1), _label in bands:
             regions.extend((by0, by1, xa, xb) for xa, xb in spans)
         values = self._read_numbers(regions)
@@ -1209,54 +1235,33 @@ class _SheetReader:
         g = self.grid
         top = g.table[1]
         if top < 20:
-            self.sheet.warnings.append("page header (employee name, month) not in the screenshot")
+            self.sheet.warnings.append("page header (employee name, period) not in the screenshot")
             return
-        region = self.rgb[:top]
-        self._read_period_dropdowns(region)
-        # the greeting sits in the left ~60 % of the page, above the buttons
-        tokens = self.ocr.detect(region[:, : int(region.shape[1] * 0.62)])
+        # the "Employee / Period" labels sit at the left of the page, above the table
+        region = self.rgb[:top, : int(self.rgb.shape[1] * 0.62)]
+        tokens = self.ocr.detect(region)
         for tok in tokens:
             _restore_spaces(tok, self.gray)
         name = ""
         for tok in tokens:
-            m = _GREETING.search(tok["text"])
-            if m:
-                name = m.group(1)
-                break
-            if _GREETING_ONLY.fullmatch(tok["text"].strip()):
+            m = _EMPLOYEE.match(tok["text"])
+            if not m:
+                continue
+            name = m.group(1)
+            if not name:   # label and value detected as separate words: take the rest of the line
                 same = sorted(
                     (t for t in tokens if abs(t["yc"] - tok["yc"]) < 0.5 * (tok["y1"] - tok["y0"])
                      and t["x0"] > tok["x1"] - 2),
                     key=lambda t: t["x0"],
                 )
                 name = " ".join(t["text"] for t in same)
-                break
+            break
         self.sheet.employee_name = _clean_name(name)
         letters = [c for c in self.sheet.employee_name if c.isalpha()]
-        timesheet_style = re.search(r"\([A-Za-z]\.?\)$", self.sheet.employee_name)
-        if letters and (timesheet_style or sum(c.isupper() for c in letters) >= 0.6 * len(letters)):
-            # Timesheet prints names in capitals; recognisers slip on case alone
+        if letters and sum(c.isupper() for c in letters) >= 0.6 * len(letters):
+            # a name printed in capitals: recognisers slip on case alone
             self.sheet.employee_name = self.sheet.employee_name.upper()
-        if self.sheet.month is None or self.sheet.year is None:
-            self._period_from_text(" ".join(t["text"] for t in tokens))
-
-    def _read_period_dropdowns(self, region: np.ndarray) -> None:
-        """Year / month live in blue dropdowns just above the grid's right side."""
-        hsv = cv2.cvtColor(region, cv2.COLOR_RGB2HSV)
-        blue = ((hsv[..., 0] >= 100) & (hsv[..., 0] <= 130) & (hsv[..., 1] > 110) & (hsv[..., 2] > 80))
-        n, _labels, stats, _ = cv2.connectedComponentsWithStats(blue.astype(np.uint8), connectivity=8)
-        bh = self.grid.box_h
-        crops = []
-        for i in range(1, n):
-            x, y, w, h, area = stats[i]
-            if 0.8 * bh <= h <= 2.5 * bh and 1.2 * h <= w <= 8 * h and area > 0.5 * w * h:
-                if x > self.grid.cols[0][0]:           # right-hand controls only
-                    crop = region[y + 2:y + h - 2, x + 3:x + w - 3]
-                    crops.append(crop)
-                    # without the dropdown chevron (it can swamp short words)
-                    crops.append(crop[:, : max(8, int(crop.shape[1] * 0.72))])
-        texts = [t for t, s in self.ocr.recognize(crops) if s > 0.5]
-        self._period_from_text(" ".join(texts))
+        self._period_from_text(" ".join(t["text"] for t in tokens if not _EMPLOYEE.match(t["text"])))
 
     def _period_from_text(self, text: str) -> None:
         for word in re.findall(r"[A-Za-z]{3,}|\d{4}", text or ""):
@@ -1297,7 +1302,7 @@ class _SheetReader:
                 if maj and val != maj and (not val or _fuzzy(_norm(val), _norm(maj)) >= 0.75):
                     setattr(ln, attr, maj)
 
-        # the weekday header tells us the calendar even without the dropdowns
+        # the weekday header tells us the calendar even without a readable period
         if s.weekdays and (s.year is None or s.month is None):
             self._infer_period_from_weekdays()
         if s.year and s.month:
@@ -1378,12 +1383,12 @@ class _SheetReader:
 
         # 1) one unknown in a row: the printed row total determines it
         for ln in lines:
-            unknown = [c for c in ln.cells if c.status != "EMPTY" and c.hours is None]
-            if len(unknown) == 1 and ln.printed_total is not None:
+            unread_cells = [c for c in ln.cells if c.status != "EMPTY" and c.hours is None]
+            if len(unread_cells) == 1 and ln.printed_total is not None:
                 rest = sum(c.hours for c in ln.cells if c.hours is not None)
                 val = round(ln.printed_total - rest, 2)
                 if 0 < val <= 24:
-                    set_cell(unknown[0], val, f"row {ln.row_index + 1} day {unknown[0].day} (row total)")
+                    set_cell(unread_cells[0], val, f"row {ln.row_index + 1} day {unread_cells[0].day} (row total)")
 
         # 2) per-day constraints from the totals rows
         for label, day_totals in s.totals.items():
@@ -1463,7 +1468,7 @@ class _SheetReader:
             })
         if not s.totals:
             s.warnings.append("totals rows not found — values could not be cross-checked")
-            checks.append({"check": "totals rows present", "expected": "NB/REG/Total rows",
+            checks.append({"check": "totals rows present", "expected": "per-type and grand total rows",
                            "actual": None, "ok": False})
         if not (s.year and s.month):
             checks.append({"check": "month and year readable", "expected": "period",

@@ -42,8 +42,17 @@ jobs:
           pip install --force-reinstall --no-deps "opencv-python-headless>=4.10"
       - name: Lint
         run: ruff check app scripts tests e2e
+      - name: Type check
+        run: mypy
       - name: Tests
         run: pytest -q tests
+      - name: Keep the generated sheets of a failed run
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: generated-timesheets
+          path: test-data/synthetic
+          retention-days: 7
 
   frontend:
     name: Frontend (types + lint + tests + build)

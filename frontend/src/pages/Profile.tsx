@@ -55,7 +55,7 @@ function ManagerExtras({ profile }: { profile: UserProfile }) {
         <Stat label="HR accounts" value={profile.hr_accounts?.length ?? 0} />
         <Stat label="Employees in repository" value={profile.employee_count ?? 0} />
         <Stat
-          label="timesheet batches processed"
+          label="Timesheet batches processed"
           value={`${profile.timesheet_batches_completed ?? 0} / ${profile.timesheet_batches_total ?? 0}`}
         />
       </div>
@@ -86,7 +86,7 @@ function ManagerExtras({ profile }: { profile: UserProfile }) {
         </table>
       </Card>
 
-      <SectionTitle>timesheet batch history</SectionTitle>
+      <SectionTitle>Timesheet batch history</SectionTitle>
       <Card className="overflow-hidden">
         <table className="data-table" data-testid="profile-batches-table">
           <thead>

@@ -25,6 +25,8 @@ EXPECTED: dict[tuple[str, str], set[str] | str] = {
     ("GET", "/api/v1/auth/m365/callback"): PUBLIC,
     ("POST", "/api/v1/auth/refresh"): PUBLIC,
     ("POST", "/api/v1/auth/logout"): PUBLIC,
+    ("GET", "/api/v1/demo"): PUBLIC,
+    ("GET", "/api/v1/demo/samples/{name}"): PUBLIC,
     ("GET", "/api/v1/auth/me"): ALL,
     ("GET", "/api/v1/users"): {MA, EX, MG},
     ("POST", "/api/v1/users"): {MA, MG},

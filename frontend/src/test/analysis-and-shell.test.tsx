@@ -59,7 +59,7 @@ describe("AnalysisResultsPage", () => {
     wrap(<AnalysisResultsPage />, "/analysis/b1", "/analysis/:batchId");
     const table = await screen.findByTestId("violations-table");
     expect(within(table).getByText("Bravo Example")).toBeInTheDocument();
-    expect(within(table).getAllByText(/31 Jul|Jul 31/)).toHaveLength(2); // in Timesheet + missing
+    expect(within(table).getAllByText(/31 Jul|Jul 31/)).toHaveLength(2); // on timesheet + missing
     expect(within(table).getByText("bravo.example@example.net")).toBeInTheDocument();
     expect(screen.getByText("Not in your repository")).toBeInTheDocument();
     expect(screen.getByText("Run abcdef12", { exact: false })).toBeInTheDocument();

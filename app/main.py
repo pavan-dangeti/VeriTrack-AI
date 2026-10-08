@@ -17,6 +17,7 @@ from app.api.routers import (
     audit,
     auth,
     dashboard,
+    demo,
     employees,
     health,
     leaves,
@@ -60,7 +61,7 @@ class RequestContextLogMiddleware(BaseHTTPMiddleware):
         return response
 
 
-def _error(code: str, message: str, extra: dict[str, Any] | None = None) -> dict:
+def _error(code: str, message: str, extra: dict[str, Any] | list[Any] | None = None) -> dict:
     err: dict[str, Any] = {"code": code, "message": message}
     if extra:
         err["details"] = extra
@@ -115,7 +116,17 @@ async def lifespan(app: FastAPI):
         await jobs.recover_interrupted_analyses()
     except Exception as exc:  # noqa: BLE001 — DB may be migrating; not fatal
         log.warning("recovery_skipped", error=str(exc)[:200])
+    demo_task = None
+    if settings.processing_mode == "background":
+        import asyncio
+
+        from app.services import demo_service
+
+        if demo_service.enabled():
+            demo_task = asyncio.get_running_loop().create_task(demo_service.run_scheduler(), name="demo-reset")
     yield
+    if demo_task is not None:
+        demo_task.cancel()
     await jobs.drain()
     await engine.dispose()
 
@@ -155,6 +166,7 @@ def create_app() -> FastAPI:
     app.include_router(dashboard.router, prefix="/api/v1")
     app.include_router(analytics.router, prefix="/api/v1")
     app.include_router(leaves.router, prefix="/api/v1")
+    app.include_router(demo.router, prefix="/api/v1")
 
     @app.exception_handler(RateLimitExceeded)
     async def rate_limited(_: Request, exc: RateLimitExceeded) -> JSONResponse:

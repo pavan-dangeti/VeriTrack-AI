@@ -134,15 +134,15 @@ def normalize_row(
 TIMESHEET_DAY_RE = re.compile(r"^(?:day\s*)?(\d{1,2})(?:\s*\(\w{2}\))?\s*$", re.IGNORECASE)
 
 TIMESHEET_ALIASES: dict[str, tuple[str, ...]] = {
-    "employee_code": ("employee_code", "person id", "personid", "employee id", "emp id"),
+    "employee_code": ("employee_code", "employee id", "emp id", "person id"),
     "full_name": ("full_name", "employee name", "name"),
-    "supplier": ("supplier",),
-    "job_family": ("job_family", "billable job family", "job family"),
-    "hour_type": ("hour_type", "uom", "hour type"),
-    "project_id": ("project_id", "project id"),
-    "project_name": ("project_name", "sub project", "subproject"),
-    "task_id": ("task_id", "sub project id", "subproject id"),
-    "remarks": ("remarks", "remark"),
+    "supplier": ("supplier", "client"),
+    "job_family": ("job_family", "role", "job family"),
+    "hour_type": ("hour_type", "type", "hour type"),
+    "project_id": ("project_id", "project code", "project id"),
+    "project_name": ("project_name", "task", "project"),
+    "task_id": ("task_id", "task code"),
+    "remarks": ("remarks", "notes", "remark"),
     "total": ("total",),
 }
 
@@ -316,7 +316,7 @@ def normalize_leave_row(mapping: dict[str, str], headers: list[str], cells: list
 def normalize_tables(tables, *, kind: str | None = None) -> list[NormalizedRow]:
     rows: list[NormalizedRow] = []
     for table in tables:
-        sheet = (getattr(table, "meta", None) or {}).get("timesheet_sheet")
+        sheet = (getattr(table, "meta", None) or {}).get("sheet")
         if sheet:
             rows.extend(normalize_timesheet(sheet))
             continue

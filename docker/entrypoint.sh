@@ -1,17 +1,14 @@
 #!/bin/sh
 # Container entrypoint.
-#   web    — migrate, seed the Master Admin once, serve the API
+#   web    — migrate, sync the Master Admin from ADMIN_EMAIL / ADMIN_PASSWORD, serve the API
 #   worker — Celery worker (PROCESSING_MODE=celery deployments)
 set -e
 
 case "${1:-web}" in
   web)
     alembic upgrade head
-    if [ -n "$SEED_ADMIN_PASSWORD" ]; then
-      python -m app.cli create-master-admin --if-not-exists
-    else
-      echo "SEED_ADMIN_PASSWORD not set — skipping Master Admin bootstrap" >&2
-    fi
+    python -m app.cli sync-master-admin
+    python -m app.cli sync-demo-account
     exec uvicorn app.main:app \
       --host 0.0.0.0 --port "${PORT:-8000}" \
       --no-proxy-headers \

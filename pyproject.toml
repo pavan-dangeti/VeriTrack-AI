@@ -19,3 +19,10 @@ ignore = [
 "tests/*" = ["S106", "S105", "B008"]  # test creds + FastAPI Depends defaults
 "scripts/capture_media.py" = ["S603"]  # runs the local ffmpeg binary
 "e2e/*" = ["S105", "S106", "S108", "S110", "S311"]  # browser tests: temp screenshots, best-effort cleanup, test data
+
+[tool.mypy]
+python_version = "3.12"
+files = ["app"]
+check_untyped_defs = true
+ignore_missing_imports = true
+warn_unused_ignores = true

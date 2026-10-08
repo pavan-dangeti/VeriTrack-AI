@@ -11,7 +11,7 @@ from tests.conftest import open_session
 from tests.helpers import csv_file, manager
 
 REPO = "Employee ID,Full Name\nE-1,Ann\nE-2,Bob\nE-3,Cid\n"
-Timesheet = "Employee ID,Name,Customer Leave,Company Leave\nE-1,Ann,x,\nE-2,Bob,x,x\n"
+TIMESHEET_CSV = "Employee ID,Name,Customer Leave,Company Leave\nE-1,Ann,x,\nE-2,Bob,x,x\n"
 
 
 async def _file_id(client, h, batch_id) -> uuid.UUID:
@@ -24,7 +24,8 @@ class TestAtomicClaims:
         from app.services.extraction.pipeline import process_uploaded_file
 
         h = await manager(client, "cc.claim")
-        batch = (await client.post("/api/v1/uploads?kind=TIMESHEET", files=[csv_file("g.csv", Timesheet)], headers=h)).json()
+        batch = (await client.post(
+            "/api/v1/uploads?kind=TIMESHEET", files=[csv_file("g.csv", TIMESHEET_CSV)], headers=h)).json()
         fid = await _file_id(client, h, batch["id"])
         async with open_session() as db:           # reset to a claimable state
             f = await db.get(UploadedFile, fid)
@@ -46,7 +47,8 @@ class TestAtomicClaims:
         from app.services.batch_service import run_batch_processing
 
         h = await manager(client, "cc.batch")
-        batch = (await client.post("/api/v1/uploads?kind=TIMESHEET", files=[csv_file("g.csv", Timesheet)], headers=h)).json()
+        batch = (await client.post(
+            "/api/v1/uploads?kind=TIMESHEET", files=[csv_file("g.csv", TIMESHEET_CSV)], headers=h)).json()
         async with open_session() as db:
             assert (await run_batch_processing(db, batch["id"])) == {"status": "skipped"}
 
@@ -55,7 +57,8 @@ class TestAtomicClaims:
 
         h = await manager(client, "cc.analyze")
         await client.post("/api/v1/uploads?kind=EMPLOYEE_REPO", files=[csv_file("r.csv", REPO)], headers=h)
-        batch = (await client.post("/api/v1/uploads?kind=TIMESHEET", files=[csv_file("g.csv", Timesheet)], headers=h)).json()
+        batch = (await client.post(
+            "/api/v1/uploads?kind=TIMESHEET", files=[csv_file("g.csv", TIMESHEET_CSV)], headers=h)).json()
 
         async def run():
             async with open_session() as db:
@@ -73,7 +76,8 @@ class TestAtomicClaims:
 
     async def test_force_reprocess_while_processing_is_rejected(self, client, ma_user_id):
         h = await manager(client, "cc.busy")
-        batch = (await client.post("/api/v1/uploads?kind=TIMESHEET", files=[csv_file("g.csv", Timesheet)], headers=h)).json()
+        batch = (await client.post(
+            "/api/v1/uploads?kind=TIMESHEET", files=[csv_file("g.csv", TIMESHEET_CSV)], headers=h)).json()
         fid = await _file_id(client, h, batch["id"])
         async with open_session() as db:
             (await db.get(UploadedFile, fid)).status = FileStatus.PROCESSING
@@ -103,7 +107,8 @@ class TestBackgroundMode:
 
         h = await manager(client, "bg.analysis")
         await client.post("/api/v1/uploads?kind=EMPLOYEE_REPO", files=[csv_file("r.csv", REPO)], headers=h)
-        batch = (await client.post("/api/v1/uploads?kind=TIMESHEET", files=[csv_file("g.csv", Timesheet)], headers=h)).json()
+        batch = (await client.post(
+            "/api/v1/uploads?kind=TIMESHEET", files=[csv_file("g.csv", TIMESHEET_CSV)], headers=h)).json()
         monkeypatch.setattr(settings, "processing_mode", "background")
         r = await client.post(f"/api/v1/batches/{batch['id']}/analyze", headers=h)
         assert r.status_code == 202 and r.json()["status"] == "RUNNING"
@@ -122,7 +127,8 @@ class TestBackgroundMode:
         from app.services import jobs
 
         h = await manager(client, "bg.recover")
-        batch = (await client.post("/api/v1/uploads?kind=TIMESHEET", files=[csv_file("g.csv", Timesheet)], headers=h)).json()
+        batch = (await client.post(
+            "/api/v1/uploads?kind=TIMESHEET", files=[csv_file("g.csv", TIMESHEET_CSV)], headers=h)).json()
         async with open_session() as db:           # simulate a crash mid-batch
             b = await db.get(UploadBatch, uuid.UUID(batch["id"]))
             b.status = BatchStatus.PROCESSING

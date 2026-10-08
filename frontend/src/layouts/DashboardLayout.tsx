@@ -52,7 +52,7 @@ function BatchWatcher() {
     qc.invalidateQueries({ queryKey: ["batches"] });
     qc.invalidateQueries({ queryKey: ["employees"] });
     qc.invalidateQueries({ queryKey: ["leaves"] });
-    const what = kind === "EMPLOYEE_REPO" ? "Repository upload" : kind === "COMPANY_LEAVE" ? "Leave register upload" : "timesheet batch";
+    const what = kind === "EMPLOYEE_REPO" ? "Repository upload" : kind === "COMPANY_LEAVE" ? "Leave register upload" : "Timesheet batch";
     if (status === "COMPLETED") toast("success", `${what} processed`);
     else if (status === "FAILED") toast("error", `${what} failed (${failed} file${failed === 1 ? "" : "s"})`);
   });

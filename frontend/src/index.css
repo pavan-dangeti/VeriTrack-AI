@@ -42,11 +42,11 @@
   --color-danger-500: var(--vt-danger-500);
   --color-danger-700: var(--vt-danger-700);
 
-  /* status cell legend — mirrors the Timesheet web app so reviewers recognise it */
-  --color-status-signed: #DC2626;
-  --color-status-pm: #fff6c9;
-  --color-status-lm: #e4e4e7;
-  --color-status-planned: #64748B;
+  /* cell status legend: the same colours the timesheet uses */
+  --color-status-draft: #e2e8f0;
+  --color-status-submitted: #f59e0b;
+  --color-status-approved: #16a34a;
+  --color-status-rejected: #dc2626;
 
   --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;

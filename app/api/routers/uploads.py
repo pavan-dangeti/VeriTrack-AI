@@ -35,7 +35,7 @@ async def create_upload(
     files: list[UploadFile],
     actor: ManagerOnly,
     db: DB,
-    kind: str = Query(description="EMPLOYEE_REPO, Timesheet or COMPANY_LEAVE"),
+    kind: str = Query(description="EMPLOYEE_REPO, TIMESHEET or COMPANY_LEAVE"),
 ):
     """Multi-file upload (max 20). Content is sniffed by magic bytes and the batch is queued;
     poll GET /uploads/batches/{id} for per-file progress."""
@@ -45,7 +45,7 @@ async def create_upload(
         raise HTTPException(
             422,
             detail={"code": "bad_kind",
-                    "message": "kind must be EMPLOYEE_REPO, Timesheet or COMPANY_LEAVE"},
+                    "message": "kind must be EMPLOYEE_REPO, TIMESHEET or COMPANY_LEAVE"},
         ) from exc
 
     contents: list[tuple[str, bytes]] = []
@@ -73,7 +73,7 @@ async def create_upload(
 async def list_batches(
     actor: BatchViewer,
     db: DB,
-    kind: BatchKind | None = Query(default=None, description="EMPLOYEE_REPO or Timesheet"),
+    kind: BatchKind | None = Query(default=None, description="EMPLOYEE_REPO or TIMESHEET"),
 ):
     stmt = select(UploadBatch).order_by(desc(UploadBatch.created_at)).limit(100)
     if kind is not None:
@@ -163,7 +163,7 @@ async def review_rows(batch_id: uuid.UUID, actor: BatchViewer, db: DB):
         raise HTTPException(404, detail={"code": "not_found", "message": "Batch not found"})
     _assert_batch_visible(actor, batch)
 
-    stmt = (
+    rows_stmt = (
         select(ExtractedRow, UploadedFile.original_filename)
         .join(UploadedFile, UploadedFile.id == ExtractedRow.file_id)
         .where(
@@ -172,7 +172,7 @@ async def review_rows(batch_id: uuid.UUID, actor: BatchViewer, db: DB):
         )
         .order_by(UploadedFile.original_filename, ExtractedRow.row_index)
     )
-    rows = (await db.execute(stmt)).all()
+    rows = (await db.execute(rows_stmt)).all()
     return {
         "items": [
             {
@@ -262,7 +262,7 @@ async def reprocess_file(
 
 def file_out(f: UploadedFile) -> FileStatusOut:
     out = FileStatusOut.model_validate(f)
-    sheets = (f.extraction_meta or {}).get("timesheet_sheets") or []
+    sheets = (f.extraction_meta or {}).get("sheets") or []
     if sheets:
         statuses = [s.get("status") for s in sheets]
         out.sheet_status = (

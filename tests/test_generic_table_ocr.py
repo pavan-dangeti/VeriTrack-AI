@@ -1,4 +1,4 @@
-"""Generic (non-Timesheet) scan reader: semantic line parsing."""
+"""Generic (non-timesheet) scan reader: semantic line parsing."""
 
 from app.services.extraction.generic_table import _classify_email, _header_columns, _parse_line
 

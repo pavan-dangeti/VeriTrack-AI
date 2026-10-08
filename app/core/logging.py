@@ -14,7 +14,7 @@ def configure_logging() -> None:
         stream=sys.stdout,
         level=logging.INFO,
     )
-    shared_processors = [
+    shared_processors: list[structlog.types.Processor] = [
         structlog.contextvars.merge_contextvars,
         structlog.stdlib.add_log_level,
         structlog.stdlib.add_logger_name,

@@ -7,7 +7,6 @@ may carry small OCR slips, which never affect the leave rule.
 """
 
 import json
-import os
 from pathlib import Path
 
 import numpy as np
@@ -19,7 +18,6 @@ pytest.importorskip("rapidocr_onnxruntime")
 from scripts.eval_ocr_accuracy import score, variants  # noqa: E402
 from scripts.gen_synthetic_timesheets import ensure  # noqa: E402
 
-ROOT = Path(__file__).resolve().parents[1]
 SYN_DIR = ensure()
 if SYN_DIR is None:
     pytest.skip("synthetic timesheets need Playwright + Chromium", allow_module_level=True)

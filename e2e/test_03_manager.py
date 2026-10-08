@@ -13,11 +13,11 @@ from conftest import (
     ACCOUNTS,
     EXPECTED_VIOLATIONS,
     FACTS,
-    TIMESHEET_SHEETS,
     LEAVE_CSV,
     REPO_CSV,
     RUN_ID,
     SYNTH,
+    TIMESHEET_SHEETS,
 )
 from playwright.sync_api import expect
 
@@ -181,7 +181,7 @@ def test_manager_timesheet_upload_progress_and_sheet_review(manager):
     expect(card.locator("[data-status=COMPLETED]").first).to_be_visible(timeout=5_000)
     expect(counter).to_have_text("4/4 files processed")
     expect(card.get_by_role("progressbar")).to_have_attribute("aria-valuenow", "100")
-    manager.toast("success", "timesheet batch processed", timeout=10_000)
+    manager.toast("success", "Timesheet batch processed", timeout=10_000)
     print("progress states observed:", sorted(seen))
 
     files = card.get_by_test_id("progress-card").locator("tbody tr")

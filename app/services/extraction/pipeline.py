@@ -61,9 +61,9 @@ def _extract(content_type: str, data: bytes, kind: str | None = None):
     rows = [verify_row(r) for r in normalize_tables(tables, kind=kind)]
     meta: dict = {}
     for table in tables:
-        sheet = (getattr(table, "meta", None) or {}).get("timesheet_sheet")
+        sheet = (getattr(table, "meta", None) or {}).get("sheet")
         if sheet:
-            meta.setdefault("timesheet_sheets", []).append(sheet)
+            meta.setdefault("sheets", []).append(sheet)
     return rows, meta
 
 
@@ -124,6 +124,8 @@ async def process_uploaded_file(db: AsyncSession, file_id: uuid_mod.UUID) -> boo
     except Exception as exc:  # noqa: BLE001
         await db.rollback()
         file = await db.get(UploadedFile, file_id, populate_existing=True)
+        if file is None:
+            return False  # purged while it was being processed
         if isinstance(exc, OcrUnavailableError):
             # Engine missing, not a bad file: keep it retryable.
             file.status = FileStatus.PENDING_OCR

@@ -1,3 +1,4 @@
+import asyncio
 import os
 import tempfile
 
@@ -29,7 +30,41 @@ TABLES = ("users", "audit_logs", "approved_m365_domains", "refresh_tokens")
 def migrated_database():
     cfg = Config("alembic.ini")
     command.upgrade(cfg, "head")
+    asyncio.run(_assert_schema_matches_models())
     yield
+
+
+async def _assert_schema_matches_models():
+    """Fail fast when the test database was built by an older revision of a migration: alembic then
+    reports head while columns are missing, and dozens of unrelated tests fail with SQL errors."""
+    from sqlalchemy.ext.asyncio import create_async_engine
+
+    import app.models  # noqa: F401
+    import app.models.audit_log  # noqa: F401
+    import app.models.m365_domain  # noqa: F401
+    import app.models.refresh_token  # noqa: F401
+    import app.models.user  # noqa: F401
+    from app.db.base import Base
+
+    eng = create_async_engine(os.environ["DATABASE_URL"])
+    try:
+        async with eng.connect() as conn:
+            rows = await conn.execute(text(
+                "SELECT table_name, column_name FROM information_schema.columns WHERE table_schema = 'public'"
+            ))
+            existing = {(t, c) for t, c in rows}
+    finally:
+        await eng.dispose()
+    missing = sorted(
+        f"{t.name}.{c.name}" for t in Base.metadata.tables.values() for c in t.columns
+        if (t.name, c.name) not in existing
+    )
+    if missing:
+        pytest.exit(
+            f"Test database schema is out of date (missing: {', '.join(missing[:5])}). "
+            "Recreate it: dropdb veritrack_test && createdb veritrack_test",
+            returncode=4,
+        )
 
 
 @pytest.fixture(autouse=True)

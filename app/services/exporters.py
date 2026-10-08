@@ -103,11 +103,11 @@ def export_png(rows: list[dict], columns: list[str]) -> bytes:
 
     padding, row_h, min_col_w = 10, 22, 90
     col_ws = [
-        max(
+        int(max(
             min_col_w,
             *(font.getbbox(str(r[i] if i < len(r) else ""))[2] + 2 * padding
               for r in [header] + body),
-        )
+        ))
         for i in range(len(header))
     ]
     img_w = sum(col_ws) + 2 * padding
