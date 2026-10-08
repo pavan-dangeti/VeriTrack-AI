@@ -89,7 +89,7 @@ flowchart LR
     B --> C[Grid geometry<br/>OpenCV rulings + day boxes]
     C --> D[Text columns<br/>PP-OCRv4 via RapidOCR]
     C --> E[Day cells<br/>per-cell recognition<br/>+ fill-colour status]
-    C --> F[Totals rows<br/>NB · REG · Total]
+    C --> F[Totals rows<br/>REG · NB · Grand total]
     D & E & F --> G{Reconcile}
     G -->|all sums agree| H[VERIFIED]
     G -->|unique repair| I[CORRECTED]
@@ -98,9 +98,9 @@ flowchart LR
 
 1. **Geometry first.** Day input boxes and table rulings are located with OpenCV, which yields the exact cell
    grid regardless of browser zoom (screens are normalised to a reference box size).
-2. **Targeted recognition.** Text columns (Person ID, Supplier, Job Family, UOM, Project, Sub-project) and the
-   page header (employee, month, year) are read with PP-OCRv4; each inked day cell is recognised on its own
-   crop and its fill colour classified as *Submitted / Approved / Reviewed / Planned*.
+2. **Targeted recognition.** Text columns (Employee ID, Client, Role, Type, Project Code, Task, Task Code) and the
+   page header (employee, period) are read with PP-OCRv4; each inked day cell is recognised on its own crop and
+   its fill colour classified as *Draft / Submitted / Approved / Rejected*.
 3. **Proof by arithmetic.** Every value is checked against the row total, the per-hour-type day totals and the
    grand total. A cell the equations determine uniquely is repaired and reported; an unreadable hour type is
    resolved the same way. Anything else — and any sheet whose totals rows or month are missing — is
