@@ -27,13 +27,18 @@ def _sanitize_filename(name: str) -> str:
 
 def build_key(*, manager_id: str, kind: str, batch_id: str, filename: str) -> str:
     safe = _sanitize_filename(filename)
-    prefix = "employee-repo" if kind == BatchKindValue.EMPLOYEE_REPO else "timesheets"
+    prefix = _KIND_PREFIX.get(kind, "timesheets")
     return f"{manager_id}/{prefix}/{batch_id}/{uuid.uuid4().hex[:8]}-{safe}"
 
 
 class BatchKindValue:
     EMPLOYEE_REPO = "EMPLOYEE_REPO"
     TIMESHEET = "TIMESHEET"
+    COMPANY_LEAVE = "COMPANY_LEAVE"
+
+
+# reporting.py moves report keys from "timesheets" to "reports", so the two must stay in step
+_KIND_PREFIX = {BatchKindValue.EMPLOYEE_REPO: "employee-repo", BatchKindValue.COMPANY_LEAVE: "leave-register"}
 
 
 class StorageBackend(Protocol):
