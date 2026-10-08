@@ -46,6 +46,13 @@ jobs:
         run: mypy
       - name: Tests
         run: pytest -q tests
+      - name: Keep the generated sheets of a failed run
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: generated-timesheets
+          path: test-data/synthetic
+          retention-days: 7
 
   frontend:
     name: Frontend (types + lint + tests + build)
