@@ -53,15 +53,24 @@ def is_demo(user: User | None) -> bool:
     return enabled() and user is not None and user.email == (settings.demo_email or "").strip().lower()
 
 
+async def _created_as_demo(db: AsyncSession, user: User) -> bool:
+    return (await db.execute(select(AuditLog.id).where(
+        AuditLog.action == audit_service.ACTION_DEMO_ACCOUNT_CREATED, AuditLog.target_id == str(user.id)
+    ).limit(1))).first() is not None
+
+
 async def sync_account(db: AsyncSession) -> User | None:
-    """Creates the demo Manager, or brings its password in line with DEMO_PASSWORD."""
+    """Creates the demo Manager, or brings its password in line with DEMO_PASSWORD.
+
+    Only an account this service created is ever adopted: pointing DEMO_EMAIL at a real user must not
+    hand that user's login to the public and wipe their data on the next reset."""
     if not enabled():
         return None
     email = (settings.demo_email or "").strip().lower()
     password = settings.demo_password or ""
     user = (await db.execute(select(User).where(User.email == email))).scalar_one_or_none()
-    if user is not None and user.role is not UserRole.MANAGER:
-        raise SystemExit(f"ERROR: DEMO_EMAIL {email} belongs to a {user.role.value} account")
+    if user is not None and not await _created_as_demo(db, user):
+        raise SystemExit(f"ERROR: DEMO_EMAIL {email} belongs to an existing account that is not the demo account")
     if user is None:
         admin = (await db.execute(select(User).where(User.role == UserRole.MASTER_ADMIN))).scalar_one_or_none()
         if admin is None:
@@ -70,6 +79,9 @@ async def sync_account(db: AsyncSession) -> User | None:
                     password_hash=await asyncio.to_thread(hash_password, password), created_by=admin.id)
         db.add(user)
         await db.commit()
+        await audit_service.record(db, action=audit_service.ACTION_DEMO_ACCOUNT_CREATED,
+                                   result=audit_service.AuditResult.SUCCESS, actor_user_id=admin.id,
+                                   target_entity="user", target_id=str(user.id))
     elif not user.password_hash or not await asyncio.to_thread(verify_password, password, user.password_hash):
         user.password_hash = await asyncio.to_thread(hash_password, password)
         await db.commit()
@@ -136,6 +148,7 @@ async def reset_if_due(db: AsyncSession) -> bool:
         await reset(db, demo)
         return True
     finally:
+        await db.rollback()   # a failed reset leaves the transaction aborted; unlock must still run
         await db.execute(text("SELECT pg_advisory_unlock(:k)"), {"k": _LOCK_ID})
         await db.commit()
 
@@ -147,7 +160,7 @@ async def run_scheduler(check_every: timedelta = timedelta(hours=1)) -> None:
         try:
             async with get_session_factory()() as db:
                 await reset_if_due(db)
-        except Exception as exc:  # noqa: BLE001 — a failed reset must not stop the API
+        except (Exception, SystemExit) as exc:  # noqa: BLE001 — a failed reset (or bad DEMO_EMAIL) must not stop the API
             log.warning("demo_reset_failed", error=str(exc)[:200])
         await asyncio.sleep(check_every.total_seconds())
 

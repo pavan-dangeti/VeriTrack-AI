@@ -3,7 +3,7 @@
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from sqlalchemy import func, select, update
+from sqlalchemy import func, select, text, update
 
 from app.core.config import settings
 from app.models.audit_log import AuditLog
@@ -63,6 +63,28 @@ async def test_demo_manager_cannot_create_users(client, demo):
     assert r.status_code == 403 and r.json()["error"]["code"] == "demo_account"
 
 
+async def test_never_adopts_an_existing_real_account(client, demo, monkeypatch):
+    await _demo_user()
+    h = await _login(client)
+    await client.post("/api/v1/uploads?kind=COMPANY_LEAVE", headers=h,
+                      files=[("files", ("l.csv", demo_service.LEAVE_CSV.encode(), "text/csv"))])
+    admin = await client.post("/api/v1/auth/login", json={"email": "ma@veritrack.io", "password": "Master!Pass123"})
+    ah = {"Authorization": f"Bearer {admin.json()['access_token']}"}
+    real = await client.post("/api/v1/users", headers=ah,
+                             json={"email": "real.manager@example.com", "role": "MANAGER", "full_name": "R"})
+    assert real.status_code == 201
+    monkeypatch.setattr(settings, "demo_email", "real.manager@example.com")   # operator typo
+    with pytest.raises(SystemExit, match="not the demo account"):
+        await _demo_user()
+    async with open_session() as db, open_session() as other:
+        with pytest.raises(SystemExit):
+            await demo_service.reset_if_due(db)
+        # advisory locks are re-entrant per session, so check from another one that it was released
+        lock = text("SELECT pg_try_advisory_lock(:k)")
+        assert (await other.execute(lock, {"k": demo_service._LOCK_ID})).scalar_one()
+        await other.execute(text("SELECT pg_advisory_unlock(:k)"), {"k": demo_service._LOCK_ID})
+
+
 async def test_sync_keeps_password_in_line(client, demo, monkeypatch):
     await _demo_user()
     monkeypatch.setattr(settings, "demo_password", "Rotated!Passw0rd-2")
@@ -117,3 +139,16 @@ async def test_full_reset_finds_the_two_planted_violations_and_never_emails(clie
     async with open_session() as db:
         result = await demo_service.reset(db, user)
     assert result["violations"] == 2
+
+
+async def test_a_reset_that_fails_in_sql_still_releases_the_lock(client, demo, monkeypatch):
+    async def failing_reset(db, user, **_):
+        await db.execute(text("SELECT 1 / 0"))     # aborts the transaction
+
+    monkeypatch.setattr(demo_service, "reset", failing_reset)
+    async with open_session() as db, open_session() as other:
+        with pytest.raises(Exception, match="division by zero"):
+            await demo_service.reset_if_due(db)
+        lock = text("SELECT pg_try_advisory_lock(:k)")
+        assert (await other.execute(lock, {"k": demo_service._LOCK_ID})).scalar_one()
+        await other.execute(text("SELECT pg_advisory_unlock(:k)"), {"k": demo_service._LOCK_ID})
