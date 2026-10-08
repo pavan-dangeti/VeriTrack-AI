@@ -1083,7 +1083,7 @@ class _SheetReader:
             line.issues.append("person id unreadable")
 
     def _totals_bands(self) -> list[tuple[float, float]]:
-        """Text rows below the last data row (NB / REG / Total …)."""
+        """Text rows below the last data row (per-type totals and the grand total)."""
         g = self.grid
         last = g.rows[-1][1]
         edges = [y for y in g.hlines if last - 3 <= y <= g.table[3] + 1]
