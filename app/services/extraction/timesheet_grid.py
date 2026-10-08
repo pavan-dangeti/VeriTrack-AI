@@ -1056,6 +1056,7 @@ class _SheetReader:
         line.supplier = supplier.strip()
         job = re.sub(r"\s+", " ", values.get("job_family", "")).strip()
         job = " ".join(w for i, w in enumerate(job.split()) if not (len(w) == 1 and w.isalpha() and i == 0))
+        job = re.sub(r"(?<=[a-z])(?=[A-Z])", " ", job)   # role titles are never CamelCase: a lost space
         line.job_family = re.sub(r"\s*-\s*", " - ", job).strip(" -")
         uom = re.sub(r"[^A-Za-z]", "", values.get("uom", "")).upper()
         line.uom = uom

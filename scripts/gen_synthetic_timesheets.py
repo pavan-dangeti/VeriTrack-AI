@@ -30,7 +30,8 @@ STATUS_STYLE = {  # fill, text, border
     "DRAFT": ("#E2E8F0", "#1f2937", "#94A3B8"),
     "APPROVED": ("#16A34A", "#ffffff", "#16A34A"),
 }
-FONTS = ["'FreeSans'", "'DejaVu Sans'", "'Carlito'", "'Liberation Sans', 'FreeSans'"]
+FONTS = ["'FreeSans', sans-serif", "'DejaVu Sans', sans-serif", "'Carlito', sans-serif",
+         "'Liberation Sans', 'FreeSans', sans-serif"]
 WD = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"]
 
 
