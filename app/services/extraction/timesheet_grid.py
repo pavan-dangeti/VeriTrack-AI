@@ -658,8 +658,8 @@ def _restore_spaces(tok: dict, gray: np.ndarray) -> None:
         joinable = ch not in "_-/." and prev not in "_-/." and not (ch.isdigit() and prev.isdigit())
         if i and ch != " " and prev != " " and joinable:
             prev_cx = rebuilt[-1][1]
-            both_upper = prev.isupper() and ch.isupper()
-            if any(prev_cx < (a + b) / 2 < cx and (st or not both_upper) for a, b, st in gaps):
+            case_change = prev.islower() and ch.isupper()
+            if any(prev_cx < (a + b) / 2 < cx and (st or case_change) for a, b, st in gaps):
                 rebuilt.append((" ", (prev_cx + cx) / 2))
         rebuilt.append((ch, cx))
     if len(rebuilt) != len(chars):
