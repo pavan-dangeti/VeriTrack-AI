@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { Navigate, useLocation, useNavigate } from "react-router-dom";
 import { CalendarCheck2, Lock, ScanLine, ShieldCheck, Sparkles } from "lucide-react";
-import { ApiError, isWakingUp, warmUp } from "../api/client";
+import { API_BASE, ApiError, isWakingUp, warmUp } from "../api/client";
+import { endpoints, type DemoInfo } from "../api/endpoints";
 import { useAuth } from "../auth/AuthContext";
 import { Button, Input } from "../components/ui/kit";
 
@@ -27,9 +28,13 @@ export function LoginPage() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [waking, setWaking] = useState(false);
+  const [demo, setDemo] = useState<DemoInfo | null>(null);
   const from = (location.state as { from?: string } | null)?.from ?? "/dashboard";
 
   useEffect(warmUp, []);
+  useEffect(() => {
+    endpoints.demo().then(setDemo).catch(() => setDemo(null));
+  }, []);
 
   if (user) return <Navigate to={from} replace />;
 
@@ -148,6 +153,36 @@ export function LoginPage() {
           <p className="mt-6 text-center text-xs text-ink-3">
             Accounts are created by your administrator. Sessions are secured with rotating tokens.
           </p>
+          {demo?.enabled && (
+            <section className="mt-6 rounded-xl border border-line bg-surface-2 p-4 text-sm" data-testid="demo-hint">
+              <p className="font-semibold text-ink">Try the live demo</p>
+              <p className="mt-1 text-ink-2">
+                A Manager account with synthetic data only, reset every {demo.reset_hours} hours.
+              </p>
+              <p className="mt-2 font-mono text-xs text-ink-2">
+                {demo.email} · {demo.password}
+              </p>
+              <Button
+                type="button"
+                variant="secondary"
+                className="mt-3 w-full"
+                onClick={() => {
+                  setEmail(demo.email);
+                  setPassword(demo.password);
+                }}
+              >
+                Use the demo account
+              </Button>
+              <p className="mt-3 text-xs text-ink-3">
+                Sample timesheets to upload:{" "}
+                {demo.samples.map((name, i) => (
+                  <a key={name} className="text-primary-600 underline" href={`${API_BASE}/demo/samples/${name}`} download>
+                    {i + 1}
+                  </a>
+                )).reduce<React.ReactNode[]>((acc, el, i) => (i ? [...acc, " · ", el] : [el]), [])}
+              </p>
+            </section>
+          )}
         </div>
       </main>
     </div>

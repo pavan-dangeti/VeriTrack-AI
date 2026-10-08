@@ -186,7 +186,12 @@ interface LeaveEntry {
   created_at: string | null;
 }
 
+export type DemoInfo =
+  | { enabled: false }
+  | { enabled: true; email: string; password: string; samples: string[]; reset_hours: number };
+
 export const endpoints = {
+  demo: () => api<DemoInfo>("/demo"),
   fileExtraction: (batchId: string, fileId: string) =>
     api<FileExtraction>(`/uploads/batches/${batchId}/files/${fileId}/extraction`),
   leaves: (params: string) => api<{ items: LeaveEntry[]; total: number }>(`/leaves${params}`),

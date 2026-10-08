@@ -28,6 +28,7 @@ browser ──► https://<app>.vercel.app  ──(/api/* rewrite)──► http
    | `ADMIN_EMAIL` | the Master Admin's email |
    | `ADMIN_PASSWORD` | a strong password; to rotate it, change it here and redeploy (all admin sessions are signed out) |
    | `CORS_ORIGINS` | your Vercel URL, e.g. `https://veritrack.vercel.app` |
+   | `DEMO_EMAIL` / `DEMO_PASSWORD` | optional: a public demo Manager. It holds synthetic data only, cannot create accounts, never sends real email, and is reset to four processed sample timesheets every `DEMO_RESET_HOURS` (24). The sign-in page shows these credentials. |
 
    `JWT_SECRET_KEY` is generated automatically.
 4. Wait for the deploy; `https://veritrack-api.onrender.com/health/ready` must

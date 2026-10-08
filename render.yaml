@@ -39,6 +39,10 @@ services:
         sync: false
       - key: ADMIN_PASSWORD
         sync: false
+      - key: DEMO_EMAIL          # optional public demo Manager (synthetic data, reset daily)
+        sync: false
+      - key: DEMO_PASSWORD
+        sync: false
       - key: OUTBOUND_EMAIL_MODE
         value: dry_run
 

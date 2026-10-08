@@ -85,3 +85,27 @@ describe("login page", () => {
     await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(/sign in failed/i));
   });
 });
+
+describe("demo account hint", () => {
+  const json = (body: unknown) => () =>
+    Promise.resolve(new Response(JSON.stringify(body), { headers: { "content-type": "application/json" } }));
+  const demo = { enabled: true, email: "demo@example.com", password: "Demo!Passw0rd-1", samples: ["a.png", "b.png"], reset_hours: 24 };
+
+  it("offers the demo login and fills it in", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(json(demo)));
+    renderLogin();
+    expect(await screen.findByTestId("demo-hint")).toHaveTextContent("demo@example.com");
+    fireEvent.click(screen.getByRole("button", { name: /use the demo account/i }));
+    expect(screen.getByLabelText("Email")).toHaveValue("demo@example.com");
+    expect(screen.getByLabelText("Password")).toHaveValue("Demo!Passw0rd-1");
+    expect(screen.getByRole("link", { name: "2" })).toHaveAttribute("href", "/api/v1/demo/samples/b.png");
+  });
+
+  it("stays hidden when the demo is disabled", async () => {
+    const fetchMock = vi.fn().mockImplementation(json({ enabled: false }));
+    vi.stubGlobal("fetch", fetchMock);
+    renderLogin();
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    expect(screen.queryByTestId("demo-hint")).not.toBeInTheDocument();
+  });
+});

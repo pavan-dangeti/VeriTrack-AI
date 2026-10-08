@@ -8,6 +8,7 @@ case "${1:-web}" in
   web)
     alembic upgrade head
     python -m app.cli sync-master-admin
+    python -m app.cli sync-demo-account
     exec uvicorn app.main:app \
       --host 0.0.0.0 --port "${PORT:-8000}" \
       --no-proxy-headers \

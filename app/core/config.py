@@ -59,6 +59,10 @@ class Settings(BaseSettings):
                              validation_alias=AliasChoices("ADMIN_EMAIL", "SEED_ADMIN_EMAIL"))
     admin_password: str | None = Field(default=None,
                                        validation_alias=AliasChoices("ADMIN_PASSWORD", "SEED_ADMIN_PASSWORD"))
+    # optional public demo Manager (synthetic data only, reset every demo_reset_hours)
+    demo_email: str | None = None
+    demo_password: str | None = None
+    demo_reset_hours: int = Field(default=24, ge=1)
 
     # local  — filesystem, development only
     # volume — filesystem on a persistent disk (allowed in production)

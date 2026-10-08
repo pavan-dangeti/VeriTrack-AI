@@ -144,6 +144,7 @@ def main() -> int:
     sub = parser.add_subparsers(dest="command", required=True)
 
     sub.add_parser("sync-master-admin")
+    sub.add_parser("sync-demo-account")
 
     p_admin = sub.add_parser("create-master-admin")
     p_admin.add_argument("--email", default=settings.admin_email)
@@ -162,6 +163,16 @@ def main() -> int:
             print("ADMIN_PASSWORD not set — Master Admin not synced", file=sys.stderr)
             return 0
         print(f"Master Admin {asyncio.run(sync_master_admin(settings.admin_email, settings.admin_password))}")
+        return 0
+    if args.command == "sync-demo-account":
+        from app.services import demo_service
+
+        async def _sync():
+            async with get_session_factory()() as db:
+                return await demo_service.sync_account(db)
+
+        user = asyncio.run(_sync())
+        print("Demo account synced" if user else "DEMO_EMAIL / DEMO_PASSWORD not set — no demo account")
         return 0
     if args.command == "create-master-admin":
         generated = args.password is None
