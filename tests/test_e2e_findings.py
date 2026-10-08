@@ -11,6 +11,7 @@ from PIL import Image
 from sqlalchemy import func, select
 
 from app.models.analysis import AnalysisRun, AnalysisStatus, GeneratedReport, ViolationResult
+from app.models.uploads import UploadedFile
 from tests.conftest import open_session
 from tests.helpers import admin, create_user, csv_file, manager
 
@@ -41,6 +42,15 @@ class TestReportsAfterResend:
             n = (await db.execute(select(func.count()).select_from(GeneratedReport)
                                   .where(GeneratedReport.run_id == uuid.UUID(run_id)))).scalar_one()
         assert n == 2  # resend re-delivers, it does not duplicate reports
+
+    async def test_reports_are_stored_apart_from_uploads(self, client, ma_user_id):
+        h, run_id = await _analysed_batch(client, "f.keys")
+        async with open_session() as db:
+            report_keys = (await db.execute(select(GeneratedReport.storage_key)
+                                            .where(GeneratedReport.run_id == uuid.UUID(run_id)))).scalars().all()
+            upload_keys = (await db.execute(select(UploadedFile.storage_key))).scalars().all()
+        assert report_keys and all(k.split("/")[1] == "reports" for k in report_keys)
+        assert {k.split("/")[1] for k in upload_keys} <= {"timesheets", "employee-repo", "leave-register"}
 
 
 class TestDashboardScope:
