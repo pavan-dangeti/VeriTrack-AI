@@ -583,9 +583,11 @@ def _glyphs(region: np.ndarray, min_height_frac: float = 0.25):
     n, labels, stats, _ = cv2.connectedComponentsWithStats(ink, connectivity=8)
     keep = np.zeros_like(ink, dtype=bool)
     min_area = max(3, int(0.006 * h * w))
+    glyphs: list[tuple[int, int, int, int]] = []
+    specks: list[tuple[int, int, int, int, int]] = []
     for i in range(1, n):
         x, y, cw, ch, area = stats[i]
-        if area < min_area:
+        if area < 2:
             continue
         touches_lr = x == 0 or x + cw >= w
         touches_tb = y == 0 or y + ch >= h
@@ -595,9 +597,22 @@ def _glyphs(region: np.ndarray, min_height_frac: float = 0.25):
             continue                       # horizontal border remnant
         if ch >= 0.92 * h and cw <= 3:
             continue                       # a ruling through the cell
-        if ch < min_height_frac * h and cw < min_height_frac * h:
-            continue                       # speck
+        if area < min_area or (ch < min_height_frac * h and cw < min_height_frac * h):
+            specks.append((x, y, cw, ch, i))
+            continue
         keep |= labels == i
+        glyphs.append((x, y, cw, ch))
+    # A decimal point is speck-sized too, but it sits on the digits' baseline between two of them;
+    # erasing it turned '3.5' into '35' and '26.5' into '265'.
+    if len(glyphs) >= 2:
+        baseline = max(y + ch for _, y, _, ch in glyphs)
+        tallest = max(ch for *_, ch in glyphs)
+        left_edge = min(x + cw for x, _, cw, _ in glyphs)
+        right_edge = max(x for x, *_ in glyphs)
+        for x, y, cw, ch, i in specks:
+            if (left_edge <= x and x + cw <= right_edge and abs(y + ch - baseline) <= 0.15 * tallest
+                    and max(cw, ch) <= 0.35 * tallest):
+                keep |= labels == i
     ys, xs = np.where(keep)
     if ys.size == 0:
         return fill, keep, None

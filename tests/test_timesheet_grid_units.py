@@ -179,6 +179,33 @@ def test_a_partial_grid_is_never_verified():
     assert r.sheet.status == "NEEDS_REVIEW"
 
 
+def _cell_with(text: str, h: int = 15, w: int = 30) -> np.ndarray:
+    import cv2
+
+    img = np.full((h, w, 3), 255, np.uint8)
+    cv2.putText(img, text, (3, h - 3), cv2.FONT_HERSHEY_SIMPLEX, h / 32, (30, 30, 30), 1, cv2.LINE_AA)
+    return img
+
+
+def test_a_decimal_point_survives_speck_removal():
+    # measured: '3.5' reached the recogniser as '35' (confidence 1.0) because the point was erased as noise
+    _, mask, _ = _glyphs(_cell_with("3.5"))
+    import cv2
+
+    n, *_ = cv2.connectedComponentsWithStats(mask.astype(np.uint8), connectivity=8)
+    assert n - 1 == 3                       # '3', '.', '5'
+
+
+def test_a_stray_speck_away_from_the_baseline_is_still_removed():
+    cell = _cell_with("35")
+    cell[2:4, 14:16] = 30                   # speck near the top, between the digits
+    _, mask, _ = _glyphs(cell)
+    import cv2
+
+    n, *_ = cv2.connectedComponentsWithStats(mask.astype(np.uint8), connectivity=8)
+    assert n - 1 == 2
+
+
 def test_a_sheet_without_a_readable_employee_id_is_never_verified():
     # measured: a heavily shadowed sheet read every hour right but the employee ID as '' and was verified
     ln = _line(0, "REG", [8, 8, 8, None, None], 24)
