@@ -85,7 +85,8 @@ are rendered by a web app, so their *layout* is regular even when the data is no
 
 ```mermaid
 flowchart LR
-    A[Screenshot<br/>any zoom / JPEG] --> B[Normalise scale<br/>from day-box size]
+    A[Screenshot<br/>any zoom / JPEG] --> P[Flatten uneven lighting<br/>level a rotated capture]
+    P --> B[Normalise scale<br/>from day-box size]
     B --> C[Grid geometry<br/>OpenCV rulings + day boxes]
     C --> D[Text columns<br/>PP-OCRv4 via RapidOCR]
     C --> E[Day cells<br/>per-cell recognition<br/>+ fill-colour status]
@@ -96,15 +97,23 @@ flowchart LR
     G -->|ambiguous| J[NEEDS_REVIEW]
 ```
 
-1. **Geometry first.** Day input boxes and table rulings are located with OpenCV, which yields the exact cell
-   grid regardless of browser zoom (screens are normalised to a reference box size).
+1. **Geometry first.** Uneven lighting is flattened and a slightly rotated capture is levelled; then day input
+   boxes and table rulings are located with OpenCV, which yields the exact cell grid regardless of browser zoom
+   (screens are normalised to a reference box size). Evenly lit, level screenshots pass through unchanged.
 2. **Targeted recognition.** Text columns (Employee ID, Client, Role, Type, Project Code, Task, Task Code) and the
    page header (employee, period) are read with PP-OCRv4; each inked day cell is recognised on its own crop and
    its fill colour classified as *Draft / Submitted / Approved / Rejected*.
 3. **Proof by arithmetic.** Every value is checked against the row total, the per-hour-type day totals and the
    grand total. A cell the equations determine uniquely is repaired and reported; an unreadable hour type is
-   resolved the same way. Anything else — and any sheet whose totals rows or month are missing — is
-   *Needs review* and is never emailed.
+   resolved the same way. Anything else is *Needs review* and is never emailed — including a sheet whose totals
+   rows, grand total or month are missing, whose day columns do not match the month, whose employee ID is
+   unreadable or differs between rows, whose task text could be leave or work, or that has handwriting over the
+   table (a struck-through value the printed totals would still agree with).
+
+**What "verified" means.** Every day's hours agree with the printed row and sheet totals, the employee ID and
+period were read (and every row agrees on the ID), and every row's task was read clearly enough to tell leave
+from work. Project and task codes, names, roles and task titles are **not** cross-checked. The review page and
+the uploads table say the same.
 
 ## Architecture
 
@@ -152,14 +161,31 @@ OCR suites use synthetic sheets with invented people and projects, rendered on d
 
 | Suite | What it proves | Result |
 |---|---|---|
-| **Backend** (`pytest tests`) | API, auth, rules, OCR, concurrency, recovery, exports, migrations | **304 passed** |
-| &nbsp;&nbsp;OCR accuracy | 16 synthetic sheets (28–31-day months, 1–9 projects, 4 fonts, 90–150 % zoom) read field-for-field | **16/16 exact** |
+| **Backend** (`pytest tests`) | API, auth, rules, OCR, concurrency, recovery, exports, migrations | **336 passed** |
+| &nbsp;&nbsp;OCR regression | 16 synthetic sheets (28–31-day months, 1–9 projects, 4 fonts, 90–150 % zoom) read field-for-field | **16/16 exact** |
 | &nbsp;&nbsp;Capture conditions | 4 sheets × 7 degradations (80–200 % zoom, JPEG q60, blur, noise): every hour, total, status, ID and period | **28/28 exact** |
 | &nbsp;&nbsp;Hostile inputs | cropped totals, cut-off columns, rotation, grayscale, tiny, padded: exact *or* flagged — never verified-and-wrong | **7/7** |
 | &nbsp;&nbsp;Permission matrix | all 42 endpoints × 4 roles + anonymous; cross-manager access to every object type | **0 leaks** |
 | **Frontend** (`npm test`) | pages, guards, flows, shell | **56 passed** |
 | **End-to-end** (`pytest e2e`, real Chromium) | every page and button for all four roles, uploads, downloads, dark mode, palette, mobile, negative paths; fails on any console error or 5xx | **48 passed**, stable across consecutive runs, also against the production build |
 | **Load** (`scripts/load_test.py`, production mode, 2 vCPU) | 50 concurrent users: 40 managers upload → OCR → analyse while 10 HR users browse continuously | **40/40 results correct, 0 errors, 0 cross-user leaks** |
+
+### OCR benchmark
+
+220 held-out generated sheets, each with one degradation (blur, skew, noise, JPEG, shadow, low resolution,
+stamp, pen marks, handwritten corrections, simulated photos), read on x86-64 — the architecture production
+runs on. Development-set numbers (the 220 sheets the fixes were tuned on) are shown alongside. Method,
+per-group results and failure analysis: [docs/ocr-benchmark.md](docs/ocr-benchmark.md).
+
+| Metric (RapidOCR, production) | Held-out set | Development set | Before this round of fixes (development set) | Reproduce |
+|---|---|---|---|---|
+| Sheets read exactly | **96 / 220 (43.6 %)** | 86 / 220 (39.1 %) | 16 / 220 (7.3 %) | `gh workflow run ocr-benchmark.yml -f seed=4729` |
+| **Verified but wrong** (a checked field wrong on a verified sheet) | **1 / 220** | 0 / 220 | 1 / 220 | same run |
+| Verified, unchecked field wrong (code, name or title) | 9 / 220 | 8 / 220 | 1 / 220 | same run |
+| Field accuracy · cell accuracy | 93.1 % · 98.4 % | 90.5 % · 98.0 % | 80.7 % · 96.0 % | same run |
+
+Comparison engine on the same held-out sheets: Tesseract 5 read 27 / 220 exactly (12.3 %), 0 verified but
+wrong, at a median 17.9 s per sheet against RapidOCR's 5.8 s (`-f engine=tesseract`).
 
 Latency during the load test (≈ 38 000 requests, OCR saturating the CPU the whole time):
 
@@ -281,8 +307,16 @@ docs/                 deployment guide, screenshots, demo video
 
 - The timesheet reader is tuned to one timesheet layout (the one `scripts/gen_synthetic_timesheets.py` renders); other scans go through a generic table reader
   and are flagged for review more often.
-- Free-text labels (names, sub-project titles) can pick up small OCR slips on heavily degraded images; they are
-  informational — the leave rule keys on person ID, hour type and dates, which are verified.
+- **Real phone photos have not been tested.** The reader is built for screenshots and digital exports;
+  simulated photos (generated from screenshots) are all refused, and the app does not claim photo support.
+- On the held-out benchmark **1 of 220 sheets was verified with a wrong value**: a handwritten correction that
+  the handwriting check missed (the struck cell was repaired back to the printed value by the totals).
+- Project and task codes, names, roles and task titles are not cross-checked; the employee ID must be readable
+  and identical on every row, but is not checked against anything else.
+- **OCR output differs between processor architectures.** The same code read 86 development sheets exactly on
+  x86-64 and 94 on an ARM Mac; two errors appeared only on x86-64 ('M ig ration' for *Migration*, 'office' for
+  a wrapped *Out Of Office*) and were fixed. Published numbers come from x86-64 CI runs.
+- Pen marks that are not data (ticks, circles) also send a sheet to review.
 - Processing a batch is sequential per batch (fair across managers); a single very large batch takes
   ~6–10 s per sheet per OCR slot.
 - Microsoft 365 sign-in and live e-mail need an Entra ID app registration and were exercised in dry-run mode.
