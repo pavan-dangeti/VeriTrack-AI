@@ -1545,6 +1545,9 @@ class _SheetReader:
         if not (s.year and s.month):
             checks.append({"check": "month and year readable", "expected": "period",
                            "actual": None, "ok": False})
+        if not re.fullmatch(r"\d{3,}", s.person_id or ""):
+            checks.append({"check": "employee ID readable", "expected": "employee ID",
+                           "actual": s.person_id or None, "ok": False})
         unread = [(ln.row_index + 1, c.day) for ln in lines for c in ln.cells
                   if c.status != "EMPTY" and c.hours is None]
         if unread:

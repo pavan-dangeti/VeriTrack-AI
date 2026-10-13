@@ -75,6 +75,7 @@ def _reader(lines, totals=None, printed=None, period=(2026, 7), days=31):
     r = _SheetReader.__new__(_SheetReader)
     r.sheet = ParsedSheet(days_in_month=days, totals=totals, totals_printed_total=printed or {})
     r.sheet.year, r.sheet.month = period
+    r.sheet.person_id = "100001"
     r.lines = lines
     r.day_offset = 0
     return r
@@ -174,5 +175,14 @@ def test_a_partial_grid_is_never_verified():
     # measured: a photo-like capture found only 21 of February's 28 day columns and one of five rows
     ln = _line(0, "REG", [8, 8, 8, None, None], 24)
     r = _reader([ln], totals={"REG": [8, 8, 8, 0, 0]}, printed={"REG": 24}, period=(2026, 2), days=21)
+    r._reconcile()
+    assert r.sheet.status == "NEEDS_REVIEW"
+
+
+def test_a_sheet_without_a_readable_employee_id_is_never_verified():
+    # measured: a heavily shadowed sheet read every hour right but the employee ID as '' and was verified
+    ln = _line(0, "REG", [8, 8, 8, None, None], 24)
+    r = _reader([ln], totals={"REG": [8, 8, 8, 0, 0]}, printed={"REG": 24})
+    r.sheet.person_id = ""
     r._reconcile()
     assert r.sheet.status == "NEEDS_REVIEW"
