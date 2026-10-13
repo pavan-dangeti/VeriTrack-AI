@@ -66,9 +66,14 @@ def test_clean_name(raw, clean):
     assert _clean_name(raw) == clean
 
 
-def _reader(lines, totals=None, printed=None, period=(2026, 7)):
+def _reader(lines, totals=None, printed=None, period=(2026, 7), days=31):
+    """A reader over hand-made lines: the first days are given, the rest of July 2026 is empty."""
+    for ln in lines:
+        ln.cells += [SheetCell(day=d, hours=None, status="EMPTY", confidence=0.99)
+                     for d in range(len(ln.cells) + 1, days + 1)]
+    totals = {k: v + [0] * (days - len(v)) for k, v in (totals or {}).items()}
     r = _SheetReader.__new__(_SheetReader)
-    r.sheet = ParsedSheet(days_in_month=5, totals=totals or {}, totals_printed_total=printed or {})
+    r.sheet = ParsedSheet(days_in_month=days, totals=totals, totals_printed_total=printed or {})
     r.sheet.year, r.sheet.month = period
     r.lines = lines
     r.day_offset = 0
@@ -146,3 +151,28 @@ def test_a_token_on_the_next_line_does_not_hide_a_missed_line():
     office_token = (381, 245, 423, 266)
     assert not _covers(office_token, (382, 234, 426, 244))   # 'Out Of' line: still recovered
     assert _covers(office_token, (382, 251, 421, 261))       # 'Office' line: already read
+
+
+def test_a_misread_totals_label_cannot_verify_vacuously():
+    # measured: a skewed capture read the only totals row as 'ALNB'; no line has that hour type, so
+    # nothing was compared and the sheet was marked verified
+    ln = _line(0, "REG", [8, 8, 8, None, None], 24)
+    r = _reader([ln], totals={"ALNB": [None] * 5}, printed={"ALNB": None})
+    r._reconcile()
+    assert r.sheet.status == "NEEDS_REVIEW"
+
+
+def test_every_hour_type_on_the_sheet_needs_its_totals_row():
+    reg = _line(0, "REG", [8, 8, None, None, None], 16)
+    nb = _line(1, "NB", [None, None, 8, None, None], 8)
+    r = _reader([reg, nb], totals={"REG": [8, 8, 0, 0, 0]}, printed={"REG": 16})
+    r._reconcile()
+    assert r.sheet.status == "NEEDS_REVIEW"
+
+
+def test_a_partial_grid_is_never_verified():
+    # measured: a photo-like capture found only 21 of February's 28 day columns and one of five rows
+    ln = _line(0, "REG", [8, 8, 8, None, None], 24)
+    r = _reader([ln], totals={"REG": [8, 8, 8, 0, 0]}, printed={"REG": 24}, period=(2026, 2), days=21)
+    r._reconcile()
+    assert r.sheet.status == "NEEDS_REVIEW"
