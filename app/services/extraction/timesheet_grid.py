@@ -255,6 +255,63 @@ class _Ocr:
         return [(_ascii(str(t)), float(s)) for t, s in results]
 
 
+class _TesseractOcr:
+    """The same interface as _Ocr, backed by Tesseract: the comparison engine in the OCR benchmark."""
+
+    def detect(self, image: np.ndarray, *, offset=(0, 0), scale: float = 1.0) -> list[dict]:
+        import pytesseract
+
+        if image.size == 0 or min(image.shape[:2]) < 8:
+            return []
+        work = cv2.resize(image, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC) if scale != 1.0 else image
+        d = pytesseract.image_to_data(work, config="--psm 11", output_type=pytesseract.Output.DICT)
+        words: dict[tuple[int, int, int], list[int]] = {}
+        for i, text in enumerate(d["text"]):
+            if text.strip() and float(d["conf"][i]) >= 0:
+                words.setdefault((d["block_num"][i], d["par_num"][i], d["line_num"][i]), []).append(i)
+        ox, oy = offset
+        tokens = []
+        for idx in words.values():
+            # one token per run of words on a line, split where the gap is wider than the text height
+            runs: list[list[int]] = [[idx[0]]]
+            for i in idx[1:]:
+                prev = runs[-1][-1]
+                gap = d["left"][i] - (d["left"][prev] + d["width"][prev])
+                (runs[-1].append(i) if gap <= 1.2 * max(d["height"][i], d["height"][prev]) else runs.append([i]))
+            for run in runs:
+                chars: list[tuple[str, float]] = []
+                for j, i in enumerate(run):
+                    text, x, w = _ascii(d["text"][i]), d["left"][i], d["width"][i]
+                    if j:
+                        prev = run[j - 1]
+                        chars.append((" ", (d["left"][prev] + d["width"][prev] + x) / 2 / scale + ox))
+                    chars += [(ch, (x + (k + 0.5) * w / len(text)) / scale + ox) for k, ch in enumerate(text)]
+                x0 = min(d["left"][i] for i in run) / scale + ox
+                x1 = max(d["left"][i] + d["width"][i] for i in run) / scale + ox
+                y0 = min(d["top"][i] for i in run) / scale + oy
+                y1 = max(d["top"][i] + d["height"][i] for i in run) / scale + oy
+                tokens.append({
+                    "text": " ".join(_ascii(d["text"][i]) for i in run).strip(),
+                    "score": float(np.mean([float(d["conf"][i]) for i in run])) / 100,
+                    "x0": x0, "x1": x1, "y0": y0, "y1": y1, "yc": (y0 + y1) / 2, "chars": chars, "angle": 0.0,
+                })
+        return tokens
+
+    def recognize(self, crops: list[np.ndarray]) -> list[tuple[str, float]]:
+        import pytesseract
+
+        out = []
+        for c in crops:
+            if c.size and c.shape[0] < 32:
+                f = 32 / max(1, c.shape[0])
+                c = cv2.resize(c, None, fx=f, fy=f, interpolation=cv2.INTER_CUBIC)
+            d = pytesseract.image_to_data(_pad(c), config="--psm 7", output_type=pytesseract.Output.DICT)
+            kept = [(t, float(cf)) for t, cf in zip(d["text"], d["conf"], strict=True) if t.strip() and float(cf) >= 0]
+            out.append((_ascii(" ".join(t for t, _ in kept)), float(np.mean([cf for _, cf in kept])) / 100 if kept
+                        else 0.0))
+        return out
+
+
 def _find_day_boxes(rgb: np.ndarray, threshold: int = 215) -> list[tuple[int, int, int, int]]:
     gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
     binary = (gray < threshold).astype(np.uint8) * 255
@@ -685,18 +742,23 @@ def is_timesheet_screenshot(rgb: np.ndarray) -> bool:
     return 28 <= len(grid.cols) <= 31
 
 
-def read_timesheet(image: np.ndarray) -> ParsedSheet:
+def read_timesheet(image: np.ndarray, *, engine: str = "rapid") -> ParsedSheet:
+    """engine: 'rapid' (PP-OCRv4 via RapidOCR, used in production) or 'tesseract' (benchmark comparison)."""
     rgb = _normalise_scale(np.ascontiguousarray(image[..., :3]).astype(np.uint8))
     grid = _locate_grid(rgb)
-    engine = ENGINE_POOL.acquire()
+    if engine == "tesseract":
+        return _SheetReader(rgb, grid, _TesseractOcr()).read()
+    if engine != "rapid":
+        raise ValueError(f"unknown OCR engine {engine!r}")
+    pooled = ENGINE_POOL.acquire()
     try:
-        return _SheetReader(rgb, grid, _Ocr(engine)).read()
+        return _SheetReader(rgb, grid, _Ocr(pooled)).read()
     finally:
-        ENGINE_POOL.release(engine)
+        ENGINE_POOL.release(pooled)
 
 
 class _SheetReader:
-    def __init__(self, rgb: np.ndarray, grid: _Grid, ocr: _Ocr) -> None:
+    def __init__(self, rgb: np.ndarray, grid: _Grid, ocr: _Ocr | _TesseractOcr) -> None:
         self.rgb = rgb
         self.gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
         self.grid = grid
