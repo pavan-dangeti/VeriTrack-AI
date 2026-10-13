@@ -19,3 +19,6 @@ strix_runs/
 .DS_Store
 frontend/node_modules/
 frontend/dist/
+# OCR benchmark data and results (scripts/bench_ocr.py)
+bench-data/
+bench-out*/
