@@ -108,6 +108,32 @@ def _num(v: float) -> float | int:
     return int(v) if float(v).is_integer() else round(v, 2)
 
 
+GEOMETRY_JS = """() => {
+    const rect = el => (r => [r.left, r.top, r.right, r.bottom])(el.getBoundingClientRect());
+    return {
+        table: rect(document.querySelector('table')),
+        rows: [...document.querySelectorAll('table tr')].slice(1)
+              .map(tr => [...tr.querySelectorAll('.box')].map(rect)).filter(r => r.length),
+    };
+}"""
+
+
+def _render(browser, html: str, zoom: float, attempts: int = 3):
+    """Screenshot plus day-box geometry. Headless Chromium occasionally fails a capture ('Unable to capture
+    screenshot'); the sheet is rendered again on a fresh page rather than failing the whole benchmark."""
+    for attempt in range(attempts):
+        page = browser.new_page(viewport={"width": 1900, "height": 800}, device_scale_factor=zoom)
+        try:
+            page.set_content(html)
+            return page.evaluate(GEOMETRY_JS), page.screenshot(full_page=True)
+        except Exception:
+            if attempt == attempts - 1:
+                raise
+        finally:
+            page.close()
+    raise AssertionError("unreachable")
+
+
 def generate(out: Path, count: int, seed: int) -> None:
     import os
 
@@ -125,18 +151,7 @@ def generate(out: Path, count: int, seed: int) -> None:
         for i, (kind, severity) in enumerate(plan):
             sheet = make_bench_sheet(rng)
             zoom = rng.choice([0.8, 0.9, 1.0, 1.0, 1.1, 1.25, 1.5])
-            page = browser.new_page(viewport={"width": 1900, "height": 800}, device_scale_factor=zoom)
-            page.set_content(render_html(sheet, FONTS[i % len(FONTS)]))
-            geometry = page.evaluate("""() => {
-                const rect = el => (r => [r.left, r.top, r.right, r.bottom])(el.getBoundingClientRect());
-                return {
-                    table: rect(document.querySelector('table')),
-                    rows: [...document.querySelectorAll('table tr')].slice(1)
-                          .map(tr => [...tr.querySelectorAll('.box')].map(rect)).filter(r => r.length),
-                };
-            }""")
-            png = page.screenshot(full_page=True)
-            page.close()
+            geometry, png = _render(browser, render_html(sheet, FONTS[i % len(FONTS)]), zoom)
             img = np.asarray(Image.open(io.BytesIO(png)).convert("RGB"))
             geo = {"table": [v * zoom for v in geometry["table"]],
                    "rows": [[[v * zoom for v in box] for box in row] for row in geometry["rows"]]}
