@@ -4,6 +4,7 @@
     python -m scripts.bench_ocr run --data bench-data --out bench-out [--engine rapid|tesseract]
                                     [--preprocess] [--shard 1/4]
     python -m scripts.bench_ocr report bench-out [more result dirs ...] > report.md
+    python -m scripts.bench_ocr print --out print-set      # 20 numbered sheets to print and photograph
 
 The sheets are rendered with the same generator as the regression tests, made more realistic (decimal
 hours, notes, longer task names, up to nine rows), then degraded: blur, skew, noise, JPEG artefacts,
@@ -129,6 +130,44 @@ def generate(out: Path, count: int, seed: int) -> None:
         browser.close()
     (out / "truth.json").write_text(json.dumps(truth, indent=1))
     print(f"wrote {count} sheets to {out}")
+
+
+def print_set(out: Path, count: int, seed: int) -> None:
+    """One A4-landscape PDF page per sheet, each labelled VT-P-NN in the app bar, plus the ground truth."""
+    import os
+
+    from playwright.sync_api import sync_playwright
+    from pypdf import PdfWriter
+
+    from scripts.gen_synthetic_timesheets import FONTS, render_html
+
+    out.mkdir(parents=True, exist_ok=True)
+    rng = random.Random(seed)  # noqa: S311 — benchmark data, not crypto
+    writer, truth = PdfWriter(), {}
+    with sync_playwright() as p:
+        exe = os.environ.get("CHROMIUM_PATH")
+        browser = p.chromium.launch(executable_path=exe) if exe else p.chromium.launch()
+        for i in range(count):
+            sid = f"VT-P-{i + 1:02d}"
+            sheet = make_bench_sheet(rng)
+            page = browser.new_page(viewport={"width": 1900, "height": 800})
+            page.set_content(render_html(sheet, FONTS[i % len(FONTS)]))
+            page.evaluate("""id => {
+                const d = document.createElement('div');
+                d.textContent = id;
+                d.style.cssText = 'position:absolute;top:16px;right:160px;color:#fff;font:bold 22px sans-serif';
+                document.body.appendChild(d);
+            }""", sid)
+            pdf = page.pdf(format="A4", landscape=True, print_background=True, scale=0.55, page_ranges="1",
+                           margin={"top": "12mm", "bottom": "12mm", "left": "8mm", "right": "8mm"})
+            page.close()
+            writer.append(io.BytesIO(pdf))
+            truth[sid] = sheet
+        browser.close()
+    with (out / "printable-timesheets.pdf").open("wb") as fh:
+        writer.write(fh)
+    (out / "truth.json").write_text(json.dumps(truth, indent=1))
+    print(f"wrote {count} printable sheets to {out}")
 
 
 # ---- degradations ------------------------------------------------------------------------------------
@@ -446,11 +485,17 @@ def main(argv: list[str]) -> int:
     r.add_argument("--shard", default="1/1")
     rep = sub.add_parser("report")
     rep.add_argument("dirs", nargs="+", type=Path)
+    pr = sub.add_parser("print")
+    pr.add_argument("--out", type=Path, default=ROOT / "print-set")
+    pr.add_argument("--count", type=int, default=20)
+    pr.add_argument("--seed", type=int, default=2026)
     a = ap.parse_args(argv)
     if a.cmd == "generate":
         generate(a.out, a.count, a.seed)
     elif a.cmd == "run":
         run(a.data, a.out, a.engine, a.preprocess, a.shard)
+    elif a.cmd == "print":
+        print_set(a.out, a.count, a.seed)
     else:
         print(report(a.dirs), end="")
     return 0

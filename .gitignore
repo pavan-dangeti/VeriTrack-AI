@@ -22,3 +22,4 @@ frontend/dist/
 # OCR benchmark data and results (scripts/bench_ocr.py)
 bench-data/
 bench-out*/
+print-set/
