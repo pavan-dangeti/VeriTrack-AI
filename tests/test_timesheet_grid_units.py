@@ -206,6 +206,35 @@ def test_a_stray_speck_away_from_the_baseline_is_still_removed():
     assert n - 1 == 2
 
 
+def _box_grid(shadow: float | None = None) -> np.ndarray:
+    import cv2
+
+    img = np.full((260, 1100, 3), 252, np.uint8)
+    for r in range(3):
+        for c in range(28):
+            x, y = 40 + c * 36, 60 + r * 40
+            cv2.rectangle(img, (x, y), (x + 30, y + 22), (150, 160, 175), 1)
+    if shadow is not None:   # light falls off from right to left, down to `shadow` of full brightness
+        img = (img * np.linspace(shadow, 1.0, img.shape[1])[None, :, None]).astype(np.uint8)
+    return img
+
+
+def test_uneven_lighting_no_longer_hides_the_day_grid():
+    from app.services.extraction.timesheet_grid import _box_lattice, _flatten_lighting
+
+    shadowed = _box_grid(shadow=0.55)
+    assert _box_lattice(shadowed) is None                   # measured: shadowed sheets were refused
+    lattice = _box_lattice(_flatten_lighting(shadowed))
+    assert lattice is not None and len(lattice[1]) == 28 and len(lattice[0]) == 3
+
+
+def test_evenly_lit_screenshots_are_left_untouched():
+    from app.services.extraction.timesheet_grid import _flatten_lighting
+
+    clean = _box_grid()
+    assert _flatten_lighting(clean) is clean
+
+
 def test_a_sheet_without_a_readable_employee_id_is_never_verified():
     # measured: a heavily shadowed sheet read every hour right but the employee ID as '' and was verified
     ln = _line(0, "REG", [8, 8, 8, None, None], 24)

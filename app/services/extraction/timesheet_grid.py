@@ -417,6 +417,20 @@ def _box_lattice_at(rgb: np.ndarray, threshold: int):
     return best[1] if best else None
 
 
+def _flatten_lighting(rgb: np.ndarray) -> np.ndarray:
+    """Uneven lighting (a shadow across the page) makes the fixed ink thresholds see dim paper as ink, so
+    the day boxes merge and no grid is found. The paper brightness is estimated everywhere (the brightest
+    pixel in a large neighbourhood, smoothed) and divided out. Evenly lit images are returned unchanged."""
+    gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
+    small = cv2.resize(gray, None, fx=0.125, fy=0.125, interpolation=cv2.INTER_AREA)
+    paper = cv2.GaussianBlur(cv2.dilate(small, np.ones((15, 15), np.uint8)), (0, 0), 5).astype(np.float32)
+    lo, hi = np.percentile(paper, 5), np.percentile(paper, 95)
+    if lo >= 0.9 * hi:
+        return rgb
+    full = cv2.resize(paper, (rgb.shape[1], rgb.shape[0]), interpolation=cv2.INTER_LINEAR)
+    return np.clip(rgb.astype(np.float32) * (250.0 / np.maximum(full, 1.0))[..., None], 0, 255).astype(np.uint8)
+
+
 def _estimate_scale(rgb: np.ndarray) -> float:
     lattice = _box_lattice(rgb)
     if lattice is not None:
@@ -759,7 +773,7 @@ def is_timesheet_screenshot(rgb: np.ndarray) -> bool:
 
 def read_timesheet(image: np.ndarray, *, engine: str = "rapid") -> ParsedSheet:
     """engine: 'rapid' (PP-OCRv4 via RapidOCR, used in production) or 'tesseract' (benchmark comparison)."""
-    rgb = _normalise_scale(np.ascontiguousarray(image[..., :3]).astype(np.uint8))
+    rgb = _normalise_scale(_flatten_lighting(np.ascontiguousarray(image[..., :3]).astype(np.uint8)))
     grid = _locate_grid(rgb)
     if engine == "tesseract":
         return _SheetReader(rgb, grid, _TesseractOcr()).read()
