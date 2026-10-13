@@ -16,8 +16,8 @@ def test_a_wrong_number_on_a_verified_sheet_is_the_dangerous_outcome():
     assert classify("VERIFIED", NUMBERS_WRONG, "exact") == "verified_wrong"
 
 
-def test_free_text_slips_are_reported_separately():
-    assert classify("VERIFIED", TEXT_SLIP, "exact") == "verified_text_slip"
+def test_unchecked_field_slips_are_reported_separately():
+    assert classify("VERIFIED", TEXT_SLIP, "exact") == "verified_unchecked_slip"
 
 
 def test_needs_review_and_refusal_are_flagged():

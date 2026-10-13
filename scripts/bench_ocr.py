@@ -8,15 +8,23 @@
 
 The sheets are rendered with the same generator as the regression tests, made more realistic (decimal
 hours, notes, longer task names, up to nine rows), then degraded: blur, skew, noise, JPEG artefacts,
-shadows, low resolution, stamps, pen marks and handwritten corrections, plus a photo-like combination.
+shadows, low resolution, stamps, pen marks and handwritten corrections, plus simulated phone photos
+(perspective tilt, page curl, uneven lighting with a colour cast, camera noise, defocus and JPEG). No real
+photographs are used: the simulated photos are an approximation, not evidence of photo support.
 Everything is synthetic and written to git-ignored folders.
 
+Fields are split by what the product acts on:
+  checked    hours, row and sheet totals, number of rows, person ID, period, hour type and each row's leave
+             flag (whether its task is 'Out Of Office'); the leave check depends on every one of them
+  unchecked  employee name, client, role, task title, project and task codes: shown and exported, but no
+             total covers them and the leave check does not use them
+
 Outcomes per sheet:
-  exact              every scored field, cell and total matches the ground truth, and the sheet is verified
-  verified_text_slip verified, all hours/totals/IDs/period right, but a free-text label (name, task) differs
-  flagged            the reader marked the sheet NEEDS_REVIEW, or refused it as not a timesheet
-  verified_wrong     verified while hours, totals, IDs or the period are wrong
-  error              the reader crashed
+  exact                    verified, and every checked and unchecked field matches the ground truth
+  verified_unchecked_slip  verified, every checked field right, but an unchecked field differs
+  flagged                  the reader marked the sheet NEEDS_REVIEW, or refused it as not a timesheet
+  verified_wrong           verified while a checked field is wrong: the outcome that must never happen
+  error                    the reader crashed
 A handwritten correction changes a value on paper that the printed totals still agree with, so for those
 sheets the only safe outcome is 'flagged'; verifying them counts as verified_wrong.
 """
@@ -42,7 +50,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 DEGRADATIONS = ("clean", "blur", "skew", "noise", "jpeg", "shadow", "lowres", "stamp", "pen", "correction",
-                "photo")
+                "simulated_photo")
 SEVERITIES = ("low", "medium", "high")
 PARAMS = {  # per severity
     "blur": {"low": 0.6, "medium": 1.0, "high": 1.4},          # Gaussian sigma (px)
@@ -54,6 +62,11 @@ PARAMS = {  # per severity
     "stamp": {"low": 0.3, "medium": 0.45, "high": 0.6},        # stamp opacity
     "pen": {"low": 2, "medium": 5, "high": 9},                 # number of pen marks
     "correction": {"low": 1, "medium": 1, "high": 2},          # struck-through cells
+    "simulated_photo": {                                        # camera held roughly over a printed page
+        "low": {"tilt": 0.02, "curl": 0.004, "darkest": 0.8, "noise": 4, "blur": 0.5, "jpeg": 85},
+        "medium": {"tilt": 0.04, "curl": 0.009, "darkest": 0.65, "noise": 7, "blur": 0.8, "jpeg": 75},
+        "high": {"tilt": 0.07, "curl": 0.015, "darkest": 0.5, "noise": 10, "blur": 1.1, "jpeg": 65},
+    },
 }
 BENCH_TASKS = ["Onboarding flow", "Billing API", "Data Pipeline", "Release_24", "Search_v2", "Payments",
                "Mobile App", "Design System", "QA", "Infra_Core", "Analytics", "Docs_Hub", "Support",
@@ -196,13 +209,40 @@ def degrade(img: np.ndarray, kind: str, severity: str, geo: dict, sheet: dict, r
         out = _pen_marks(img, p, geo, rng)
     elif kind == "correction":
         out, edits = _corrections(img, p, geo, sheet, rng)
-    elif kind == "photo":
-        angle = rng.uniform(0.5, 1.5) * rng.choice([-1, 1])
-        p = {"angle": round(angle, 2), "shadow": 0.75, "blur": 0.7, "noise": 5, "jpeg": 60}
-        out = _jpeg(_noise(cv2.GaussianBlur(_shadow(_rotate(img, angle), 0.75, rng), (0, 0), 0.7), 5, rng), 60)
+    elif kind == "simulated_photo":
+        out = _simulated_photo(img, p, rng)
     else:
         raise ValueError(kind)
     return np.ascontiguousarray(out), p, edits
+
+
+def _simulated_photo(img: np.ndarray, p: dict, rng: random.Random) -> np.ndarray:
+    """A page photographed by hand: placed on a desk, seen at an angle, slightly curled, lit unevenly with a
+    warm cast, then camera noise, a little defocus and JPEG. An approximation of a phone photo, not one."""
+    h, w = img.shape[:2]
+    margin = int(0.06 * max(h, w))
+    desk = np.array([rng.randint(150, 175), rng.randint(135, 155), rng.randint(115, 135)], np.uint8)
+    canvas = np.empty((h + 2 * margin, w + 2 * margin, 3), np.uint8)
+    canvas[:] = desk
+    # page curl: rows bend into a shallow arc across the page width
+    amp = p["curl"] * h
+    xs = np.arange(w, dtype=np.float32)
+    map_y = (np.arange(h, dtype=np.float32)[:, None] - amp * np.sin(np.pi * xs / w)[None, :]).astype(np.float32)
+    map_x = np.repeat(xs[None, :], h, 0)
+    page = cv2.remap(img, map_x, map_y, cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
+    canvas[margin:margin + h, margin:margin + w] = page
+    # perspective tilt: each page corner moves inwards by up to `tilt` of the page size
+    src = np.float32([[margin, margin], [margin + w, margin], [margin + w, margin + h], [margin, margin + h]])
+    jitter = [[rng.uniform(0, p["tilt"]) * w * sx, rng.uniform(0, p["tilt"]) * h * sy]
+              for sx, sy in ((1, 1), (-1, 1), (-1, -1), (1, -1))]
+    dst = np.float32(src + np.float32(jitter))
+    warped = cv2.warpPerspective(canvas, cv2.getPerspectiveTransform(src, dst), (canvas.shape[1], canvas.shape[0]),
+                                 flags=cv2.INTER_LINEAR, borderValue=tuple(int(v) for v in desk))
+    lit = _shadow(warped, p["darkest"], rng)
+    cast = np.array([1.0, rng.uniform(0.95, 0.99), rng.uniform(0.86, 0.94)], np.float32)   # warm white balance
+    lit = np.clip(lit.astype(np.float32) * cast, 0, 255).astype(np.uint8)
+    noisy = _noise(cv2.GaussianBlur(lit, (0, 0), p["blur"]), p["noise"], rng)
+    return _jpeg(noisy, p["jpeg"])
 
 
 def _rotate(img: np.ndarray, angle: float) -> np.ndarray:
@@ -307,7 +347,7 @@ def _corrections(img: np.ndarray, count: int, geo: dict, sheet: dict, rng: rando
 # ---- scoring -----------------------------------------------------------------------------------------
 
 LINE_FIELDS = ("uom", "project_id", "sub_project", "sub_project_id")
-INFORMATIONAL = {"employee_name", "supplier", "job_family", "sub_project"}   # free text, never drives the rule
+UNCHECKED = {"employee_name", "supplier", "job_family", "sub_project", "project_id", "sub_project_id"}
 
 
 def evaluate(sheet, truth: dict) -> dict:
@@ -324,6 +364,7 @@ def evaluate(sheet, truth: dict) -> dict:
         for key in LINE_FIELDS:
             fields[key].append(ln is not None and getattr(ln, key) == tl[key])
         fields["row_total"].append(ln is not None and ln.printed_total == tl["total"])
+        fields["leave_flag"].append(ln is not None and ln.is_out_of_office == (tl["sub_project"] == "Out Of Office"))
         got = ln.hours_by_day if ln else {}
         for d in range(1, truth["days_in_month"] + 1):
             want = tl["days"].get(str(d))
@@ -334,7 +375,7 @@ def evaluate(sheet, truth: dict) -> dict:
     totals = [sheet.totals_printed_total.get(k) == v for k, v in truth["totals"].items()]
     line_count_ok = len(sheet.lines) == len(truth["lines"])
     numeric_ok = (all(cells) and all(totals) and line_count_ok
-                  and all(all(v) for k, v in fields.items() if k not in INFORMATIONAL))
+                  and all(all(v) for k, v in fields.items() if k not in UNCHECKED))
     return {"fields": {k: [sum(v), len(v)] for k, v in fields.items()},
             "cells": [sum(cells), len(cells)], "statuses": [sum(statuses), len(statuses)],
             "totals": [sum(totals), len(totals)], "line_count_ok": line_count_ok,
@@ -351,7 +392,7 @@ def classify(status: str | None, ev: dict | None, expected: str) -> str:
         return "flagged"
     if not ev["numeric_ok"]:
         return "verified_wrong"
-    return "exact" if ev["exact"] else "verified_text_slip"
+    return "exact" if ev["exact"] else "verified_unchecked_slip"
 
 
 # ---- run ---------------------------------------------------------------------------------------------
@@ -433,9 +474,10 @@ def report(dirs: list[Path]) -> str:
     if not rows:
         return "no results\n"
     meta = metas[0]
-    lines = [f"Engine **{meta['engine']}**, preprocessing **{'on' if meta['preprocess'] else 'off'}**, "
+    lines = ["The `simulated_photo` group is generated from screenshots; no real photographs were tested.", "",
+             f"Engine **{meta['engine']}**, preprocessing **{'on' if meta['preprocess'] else 'off'}**, "
              f"`{meta['machine']}`, Python {meta['python']}, commit `{meta['commit']}`, {len(rows)} sheets.", "",
-             "| Group | Sheets | Exact | Verified, text slip only | Flagged | **Verified but wrong** | Error | "
+             "| Group | Sheets | Exact | Verified, unchecked field wrong | Flagged | **Verified but wrong** | Error | "
              "Field accuracy | Cell accuracy |", "|---|---|---|---|---|---|---|---|---|"]
     for label, sel in [("**All**", rows)] + [(t, [r for r in rows if r["type"] == t]) for t in DEGRADATIONS]:
         a = _agg(sel)
@@ -443,7 +485,7 @@ def report(dirs: list[Path]) -> str:
             continue
         o = a["outcomes"]
         lines.append(f"| {label} | {a['n']} | {o['exact']} ({_pct(o['exact'], a['n'])}) | "
-                     f"{o['verified_text_slip']} | {o['flagged']} | **{o['verified_wrong']}** | {o['error']} | "
+                     f"{o['verified_unchecked_slip']} | {o['flagged']} | **{o['verified_wrong']}** | {o['error']} | "
                      f"{_pct(*a['f'])} | {_pct(*a['c'])} |")
     lines += ["", "By severity (exact / flagged / verified-but-wrong, of n):", "",
               "| Degradation | Low | Medium | High |", "|---|---|---|---|"]
