@@ -1542,6 +1542,9 @@ class _SheetReader:
                 checks.append({"check": f"{label} day totals", "expected": 0, "actual": len(nonzero),
                                "ok": not nonzero and readable >= 0.9 * len(day_totals),
                                "mismatched_days": nonzero})
+                printed = s.totals_printed_total.get(label)
+                checks.append({"check": f"{label} grand total", "expected": 0, "actual": printed,
+                               "ok": printed == 0})
                 continue
             mismatched = []
             for di, expected in enumerate(day_totals):
@@ -1564,6 +1567,9 @@ class _SheetReader:
                 "check": f"{label} grand total", "expected": printed, "actual": got,
                 "ok": printed is not None and abs(got - printed) < 1e-6,
             })
+        if s.totals and "TOTAL" not in s.totals:
+            checks.append({"check": "grand total row found", "expected": "a grand total row", "actual": None,
+                           "ok": False})
         for uom in sorted({ln.uom for ln in lines if ln.uom} - set(s.totals)):
             checks.append({"check": f"{uom} totals row found", "expected": f"a {uom} totals row",
                            "actual": None, "ok": False})

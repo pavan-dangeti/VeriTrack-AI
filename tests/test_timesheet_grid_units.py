@@ -72,8 +72,13 @@ def _reader(lines, totals=None, printed=None, period=(2026, 7), days=31):
         ln.cells += [SheetCell(day=d, hours=None, status="EMPTY", confidence=0.99)
                      for d in range(len(ln.cells) + 1, days + 1)]
     totals = {k: v + [0] * (days - len(v)) for k, v in (totals or {}).items()}
+    printed = dict(printed or {})
+    if totals and "TOTAL" not in totals:   # real sheets end with a grand total row; mirror the per-type rows
+        totals["TOTAL"] = [sum(v[d] or 0 for v in totals.values()) for d in range(days)]
+        known = [v for v in printed.values() if v is not None]
+        printed["TOTAL"] = sum(known) if known else None
     r = _SheetReader.__new__(_SheetReader)
-    r.sheet = ParsedSheet(days_in_month=days, totals=totals, totals_printed_total=printed or {})
+    r.sheet = ParsedSheet(days_in_month=days, totals=totals, totals_printed_total=printed)
     r.sheet.year, r.sheet.month = period
     r.sheet.person_id = "100001"
     r.lines = lines
@@ -262,3 +267,22 @@ def test_clear_leave_and_work_tasks_still_verify(task):
     r = _reader([ln], totals={"NB": [8, 8, 8, 0, 0]}, printed={"NB": 24})
     r._reconcile()
     assert r.sheet.status == "VERIFIED"
+
+
+def test_a_sheet_whose_grand_total_row_was_not_read_is_never_verified():
+    # measured: every hour right, but the grand total row was not found and the sheet was verified on the
+    # per-type rows alone; 'verified' promises agreement with the sheet totals too
+    ln = _line(0, "REG", [8, 8, 8, None, None], 24)
+    r = _reader([ln], totals={"REG": [8, 8, 8, 0, 0]}, printed={"REG": 24})
+    del r.sheet.totals["TOTAL"], r.sheet.totals_printed_total["TOTAL"]
+    r._reconcile()
+    assert r.sheet.status == "NEEDS_REVIEW"
+
+
+def test_an_unused_hour_type_row_must_total_zero():
+    # measured: no row was non-billable, but the NB grand total was misread as 5 and the sheet verified
+    ln = _line(0, "REG", [8, 8, 8, None, None], 24)
+    r = _reader([ln], totals={"REG": [8, 8, 8, 0, 0], "NB": [0, 0, 0, 0, 0]}, printed={"REG": 24, "NB": 5})
+    r.sheet.totals_printed_total["TOTAL"] = 24
+    r._reconcile()
+    assert r.sheet.status == "NEEDS_REVIEW"
