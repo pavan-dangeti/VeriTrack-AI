@@ -242,3 +242,23 @@ def test_a_sheet_without_a_readable_employee_id_is_never_verified():
     r.sheet.person_id = ""
     r._reconcile()
     assert r.sheet.status == "NEEDS_REVIEW"
+
+
+@pytest.mark.parametrize("task", ["Office", "Out Of", "Payments Out Of"])
+def test_a_task_that_could_be_leave_or_work_blocks_verification(task):
+    # measured: on a skewed sheet the wrapped 'Out Of / Office' cell split into 'Payments Out Of' and
+    # 'Office', the leave row was missed, and the sheet was verified
+    ln = _line(0, "NB", [8, 8, 8, None, None], 24)
+    ln.sub_project = task
+    r = _reader([ln], totals={"NB": [8, 8, 8, 0, 0]}, printed={"NB": 24})
+    r._reconcile()
+    assert r.sheet.status == "NEEDS_REVIEW"
+
+
+@pytest.mark.parametrize("task", ["Out Of Office", "Support", "Customer Portal"])
+def test_clear_leave_and_work_tasks_still_verify(task):
+    ln = _line(0, "NB", [8, 8, 8, None, None], 24)
+    ln.sub_project = task
+    r = _reader([ln], totals={"NB": [8, 8, 8, 0, 0]}, printed={"NB": 24})
+    r._reconcile()
+    assert r.sheet.status == "VERIFIED"

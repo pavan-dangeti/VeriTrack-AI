@@ -36,6 +36,10 @@ TEXT_COLUMNS: tuple[tuple[str, tuple[str, ...]], ...] = (
 )
 # "Employee  NAME" in the page header — tolerant of OCR slips like 'Emp1oyee' / 'Employe'
 _EMPLOYEE = re.compile(r"^\s*emp[l1i]oye{1,2}\s*[,.:;]?\s*(.*)$", re.IGNORECASE)
+# a task this similar to 'Out Of Office' is leave (allowing OCR slips); between AMBIGUOUS_LEAVE and that it
+# could be either, e.g. half of a wrapped 'Out Of / Office' cell; ordinary task names score below 0.35
+LEAVE_SIMILARITY = 0.85
+AMBIGUOUS_LEAVE = 0.4
 SPLIT_SCORE = 0.8499  # marker confidence for text split across columns by char position
 _LABELS = sorted(
     ((key, alias.replace(" ", "")) for key, aliases in TEXT_COLUMNS for alias in aliases),
@@ -1165,7 +1169,7 @@ class _SheetReader:
         sub = re.sub(r"\s*_\s*", "_", sub)
         sub = re.sub(r"(?<=[A-Za-z])[.,:;'`](?=\s)", "", sub)   # stray recogniser dots
         sub = re.sub(r"[\s\-:;.,_~]+$", "", sub)
-        if _fuzzy(_norm(sub), "outofoffice") >= 0.85:
+        if _fuzzy(_norm(sub), "outofoffice") >= LEAVE_SIMILARITY:
             sub = "Out Of Office"          # the sheet's leave project
         line.sub_project = sub
         line.sub_project_id = re.sub(r"\D", "", values.get("sub_project_id", ""))
@@ -1574,6 +1578,11 @@ class _SheetReader:
         if not (s.year and s.month):
             checks.append({"check": "month and year readable", "expected": "period",
                            "actual": None, "ok": False})
+        for ln in lines:
+            similarity = _fuzzy(_norm(ln.sub_project), "outofoffice")
+            if AMBIGUOUS_LEAVE <= similarity < LEAVE_SIMILARITY and not ln.is_out_of_office:
+                checks.append({"check": f"row {ln.row_index + 1} task reads clearly as leave or work",
+                               "expected": "leave or work", "actual": ln.sub_project, "ok": False})
         if not re.fullmatch(r"\d{3,}", s.person_id or ""):
             checks.append({"check": "employee ID readable", "expected": "employee ID",
                            "actual": s.person_id or None, "ok": False})
