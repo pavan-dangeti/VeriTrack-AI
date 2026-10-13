@@ -96,6 +96,7 @@ describe("SheetReviewPage", () => {
     state.verified = true;
     renderPage();
     const checks = await screen.findByTestId("checks");
+    expect(screen.getByTestId("verified-means")).toHaveTextContent(/task codes, names, roles and task titles are not cross-checked/);
     expect(within(checks).getAllByLabelText("passed")).toHaveLength(2);
     expect(screen.getByText(/day 27/)).toBeInTheDocument();
     expect(screen.getByText("Auto-corrected")).toBeInTheDocument();

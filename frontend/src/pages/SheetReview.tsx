@@ -14,6 +14,7 @@ import {
 import { blobUrl } from "../api/client";
 import { endpoints, type SheetLine, type ParsedSheet } from "../api/endpoints";
 import { Badge, Card, EmptyState, PageHeader, SectionTitle, Skeleton, StatusBadge, Tabs } from "../components/ui/kit";
+import { VERIFIED_MEANS } from "../lib/verification";
 import { fmtHours, fmtPeriod } from "../lib/format";
 
 const CELL_STYLE: Record<string, string> = {
@@ -179,6 +180,7 @@ function SheetView({ sheet, view, batchId, fileId }: { sheet: ParsedSheet; view:
       <div className="grid gap-5 lg:grid-cols-2">
         <Card className="p-5">
           <SectionTitle flush>Verification ({sheet.checks.length - failed.length}/{sheet.checks.length} passed)</SectionTitle>
+          <p className="mb-3 text-xs text-ink-3" data-testid="verified-means">{VERIFIED_MEANS}</p>
           <ul className="space-y-2" data-testid="checks">
             {sheet.checks.map((c, i) => (
               <li key={i} className="flex items-start gap-2.5 text-sm">

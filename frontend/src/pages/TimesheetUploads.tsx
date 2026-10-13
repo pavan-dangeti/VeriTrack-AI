@@ -30,6 +30,7 @@ import {
   StatusBadge,
 } from "../components/ui/kit";
 import { useToast } from "../components/ui/toast";
+import { VERIFIED_MEANS } from "../lib/verification";
 import { fmtBytes, fmtDateTime, fmtPeriod, timeAgo } from "../lib/format";
 
 const ALLOWED = ["png", "jpg", "jpeg", "pdf", "xlsx", "xls", "csv"];
@@ -252,13 +253,13 @@ function BatchCard({
 function SheetBadge({ file }: { file: BatchFile }) {
   if (!file.sheet_status) return null;
   const map = {
-    VERIFIED: { tone: "success" as const, label: "Totals verified" },
+    VERIFIED: { tone: "success" as const, label: "Verified" },
     CORRECTED: { tone: "primary" as const, label: "Verified · auto-corrected" },
-    NEEDS_REVIEW: { tone: "warning" as const, label: "Totals mismatch" },
+    NEEDS_REVIEW: { tone: "warning" as const, label: "Needs review" },
   };
   const s = map[file.sheet_status];
   return (
-    <Badge tone={s.tone}>
+    <Badge tone={s.tone} title={file.sheet_status !== "NEEDS_REVIEW" ? VERIFIED_MEANS : undefined}>
       {file.sheet_status !== "NEEDS_REVIEW" && <CheckCircle2 className="h-3 w-3" aria-hidden />}
       {s.label}
     </Badge>

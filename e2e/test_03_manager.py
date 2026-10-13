@@ -189,7 +189,7 @@ def test_manager_timesheet_upload_progress_and_sheet_review(manager):
     for i in range(4):
         row = files.nth(i)
         expect(row.locator("[data-status=DONE]")).to_be_visible()
-        expect(row.get_by_text(re.compile(r"Totals verified|auto-corrected"))).to_be_visible()
+        expect(row.get_by_text(re.compile(r"Verified"))).to_be_visible()
     manager.shot("manager-timesheet-completed")
 
     f = manager.expect_download(
