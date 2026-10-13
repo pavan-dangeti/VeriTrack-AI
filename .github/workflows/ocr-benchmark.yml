@@ -1,0 +1,118 @@
+name: OCR benchmark
+
+# Manual only: renders the benchmark sheets on an x86-64 runner (the architecture production runs on),
+# reads them in parallel shards and publishes one report. See scripts/bench_ocr.py.
+on:
+  workflow_dispatch:
+    inputs:
+      engine:
+        description: OCR engine
+        type: choice
+        options: [rapid, tesseract]
+        default: rapid
+      preprocess:
+        description: Image preprocessing before reading
+        type: boolean
+        default: false
+      count:
+        description: Number of sheets
+        type: number
+        default: 220
+
+concurrency:
+  group: ocr-benchmark-${{ github.ref }}-${{ inputs.engine }}-${{ inputs.preprocess }}
+  cancel-in-progress: true
+
+jobs:
+  generate:
+    name: Render benchmark sheets
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements*.txt
+      - name: Install
+        run: |
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends \
+            fonts-freefont-ttf fonts-dejavu-core fonts-crosextra-carlito fonts-liberation
+          pip install -r requirements-dev.txt
+          playwright install --with-deps chromium
+          pip uninstall -y opencv-python
+          pip install --force-reinstall --no-deps "opencv-python-headless>=4.10"
+      - name: Generate
+        env:
+          COUNT: ${{ inputs.count }}
+        run: python -m scripts.bench_ocr generate --out bench-data --count "$COUNT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bench-data
+          path: bench-data
+          retention-days: 7
+
+  read:
+    name: Read shard ${{ matrix.shard }}/6
+    needs: generate
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements*.txt
+      - name: Install
+        run: |
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends tesseract-ocr
+          pip install -r requirements.txt
+          pip uninstall -y opencv-python
+          pip install --force-reinstall --no-deps "opencv-python-headless>=4.10"
+      - uses: actions/download-artifact@v4
+        with:
+          name: bench-data
+          path: bench-data
+      - name: Read
+        env:
+          ENGINE: ${{ inputs.engine }}
+          PREPROCESS: ${{ inputs.preprocess && '--preprocess' || '' }}
+          SHARD: ${{ matrix.shard }}
+        run: python -m scripts.bench_ocr run --data bench-data --out bench-out --engine "$ENGINE" $PREPROCESS --shard "$SHARD/6"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bench-out-${{ matrix.shard }}
+          path: bench-out
+          retention-days: 30
+
+  report:
+    name: Report
+    needs: read
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: bench-out-*
+          path: shards
+      - name: Merge shards into one report
+        run: |
+          mkdir -p bench-report
+          for d in shards/*; do cp -r "$d"/. bench-report/; done
+          pip install numpy opencv-python-headless pillow >/dev/null
+          python -m scripts.bench_ocr report bench-report | tee bench-report/report.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ocr-benchmark-${{ inputs.engine }}-${{ inputs.preprocess && 'preprocessed' || 'raw' }}
+          path: bench-report
+          retention-days: 90
