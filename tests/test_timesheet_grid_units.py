@@ -362,3 +362,45 @@ def test_an_unreadable_id_on_one_row_does_not_conflict():
     r._fill_sheet_identity()
     r._reconcile()
     assert r.sheet.verified and r.sheet.person_id == "100410"
+
+
+def _rotated(img: np.ndarray, angle: float) -> np.ndarray:
+    from PIL import Image
+
+    return np.asarray(Image.fromarray(img).rotate(angle, resample=Image.BICUBIC, expand=True, fillcolor="white"))
+
+
+def _ruled_grid() -> np.ndarray:
+    import cv2
+
+    img = _box_grid()
+    for y in (50, 92, 132, 172):                 # table rulings between the rows
+        cv2.line(img, (20, y), (1080, y), (226, 232, 240), 1)
+    return img
+
+
+def _row_tilt(img: np.ndarray) -> float:
+    """Vertical spread (px) of the day boxes along the first row: 0 when the page is level."""
+    from app.services.extraction.timesheet_grid import _box_lattice
+
+    _rows, _cols, boxes, _h, _p = _box_lattice(img)
+    ys = [y + h / 2 for (r, _c), (_x, y, _w, h) in boxes.items() if r == 0]
+    return max(ys) - min(ys)
+
+
+@pytest.mark.parametrize("angle", [1.5, -1.0])
+def test_a_rotated_sheet_is_levelled_before_it_is_read(angle):
+    # measured: every sheet skewed by 0.8-3 degrees was flagged; across a wide page a tilted row drifts by more
+    # than a row height, so text and cells land in the wrong rows
+    from app.services.extraction.timesheet_grid import _deskew
+
+    tilted = _rotated(_ruled_grid(), angle)
+    assert _row_tilt(tilted) > 15
+    assert _row_tilt(_deskew(tilted)) <= 2
+
+
+def test_a_straight_screenshot_is_left_untouched_by_deskew():
+    from app.services.extraction.timesheet_grid import _deskew
+
+    img = _ruled_grid()
+    assert _deskew(img) is img

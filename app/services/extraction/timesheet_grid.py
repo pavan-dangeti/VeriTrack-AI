@@ -435,6 +435,30 @@ def _flatten_lighting(rgb: np.ndarray) -> np.ndarray:
     return np.clip(rgb.astype(np.float32) * (250.0 / np.maximum(full, 1.0))[..., None], 0, 255).astype(np.uint8)
 
 
+def _deskew(rgb: np.ndarray) -> np.ndarray:
+    """A sheet captured at a slight angle (a rotated scan or screenshot): the day boxes no longer line up in
+    rows and columns, so no grid is found. The rotation is estimated from long near-horizontal lines (rows
+    of day boxes, table rulings) and undone when it is at least 0.3 degrees; straight images are returned
+    unchanged."""
+    from PIL import Image
+
+    gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
+    edges = cv2.Canny(gray, 30, 90)
+    lines = cv2.HoughLinesP(edges, 1, np.pi / 1800, threshold=100, minLineLength=int(0.25 * rgb.shape[1]),
+                            maxLineGap=8)
+    if lines is None:
+        return rgb
+    angles = [float(np.degrees(np.arctan2(y1 - y0, x1 - x0))) for x0, y0, x1, y1 in lines.reshape(-1, 4)]
+    angles = [a for a in angles if abs(a) <= 5]
+    if len(angles) < 2:
+        return rgb
+    angle = float(np.median(angles))
+    if abs(angle) < 0.3:
+        return rgb
+    return np.asarray(Image.fromarray(rgb).rotate(angle, resample=Image.Resampling.BICUBIC, expand=True,
+                                                  fillcolor="white"))
+
+
 def _estimate_scale(rgb: np.ndarray) -> float:
     lattice = _box_lattice(rgb)
     if lattice is not None:
@@ -809,7 +833,7 @@ def is_timesheet_screenshot(rgb: np.ndarray) -> bool:
 
 def read_timesheet(image: np.ndarray, *, engine: str = "rapid") -> ParsedSheet:
     """engine: 'rapid' (PP-OCRv4 via RapidOCR, used in production) or 'tesseract' (benchmark comparison)."""
-    rgb = _normalise_scale(_flatten_lighting(np.ascontiguousarray(image[..., :3]).astype(np.uint8)))
+    rgb = _normalise_scale(_deskew(_flatten_lighting(np.ascontiguousarray(image[..., :3]).astype(np.uint8))))
     grid = _locate_grid(rgb)
     if engine == "tesseract":
         return _SheetReader(rgb, grid, _TesseractOcr()).read()
