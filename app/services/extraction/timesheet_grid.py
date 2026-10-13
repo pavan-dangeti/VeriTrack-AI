@@ -1621,7 +1621,15 @@ class _SheetReader:
         if not (s.year and s.month):
             checks.append({"check": "month and year readable", "expected": "period",
                            "actual": None, "ok": False})
+        hour_types = set(s.totals) | {ln.uom for ln in lines if ln.uom}
         for ln in lines:
+            task = (ln.sub_project or "").strip()
+            if not task or task.upper() in hour_types:
+                # an empty task cannot be told apart as leave or work; one that reads as an hour type means the
+                # text columns were misaligned (a stamp over the headers shifted them and a leave row was missed)
+                checks.append({"check": f"row {ln.row_index + 1} task read", "expected": "a task",
+                               "actual": task or None, "ok": False})
+                continue
             similarity = _fuzzy(_norm(ln.sub_project), "outofoffice")
             if AMBIGUOUS_LEAVE <= similarity < LEAVE_SIMILARITY and not ln.is_out_of_office:
                 checks.append({"check": f"row {ln.row_index + 1} task reads clearly as leave or work",

@@ -326,3 +326,15 @@ def test_camera_noise_is_not_mistaken_for_blue_ink():
     noisy = np.clip(img.astype(np.int16) + np.random.default_rng(3).normal(0, 20, img.shape), 0, 255)
     noisy = noisy.astype(np.uint8)
     assert not _marks_over_grid(noisy, _grid_for(img))
+
+
+@pytest.mark.parametrize("task", ["", "NB", "REG"])
+def test_a_missing_or_misaligned_task_blocks_verification(task):
+    # measured: a stamp over the column headers shifted the text columns, the Task column read the hour
+    # type ('REG', 'NB'), the leave row was missed and the sheet was verified
+    reg = _line(0, "REG", [8, 8, None, None, None], 16)
+    nb = _line(1, "NB", [None, None, 8, None, None], 8)
+    nb.sub_project = task
+    r = _reader([reg, nb], totals={"REG": [8, 8, 0, 0, 0], "NB": [0, 0, 8, 0, 0]}, printed={"REG": 16, "NB": 8})
+    r._reconcile()
+    assert r.sheet.status == "NEEDS_REVIEW"
