@@ -468,6 +468,38 @@ def _locate_grid(rgb: np.ndarray) -> _Grid:
                  table=table, hlines=hlines, vlines=vlines)
 
 
+def _marks_over_grid(rgb: np.ndarray, grid: _Grid) -> bool:
+    """Handwriting over the table. A struck-through value with a new number written beside it is invisible to
+    the reader while the printed totals still agree, so such a sheet must not be verified. Two cues:
+    - a connected stroke of saturated blue ink (the page has no saturated blue; scattered noise pixels are
+      not connected, so they are removed first)
+    - a long diagonal stroke of dark, unsaturated ink (black pen) among the day boxes: the page itself has
+      only horizontal and vertical lines there, digits are short, and the coloured fills are saturated."""
+    x0, y0, x1, y1 = (max(0, int(v)) for v in grid.table)
+    region = rgb[y0:y1, x0:x1]
+    if region.size == 0:
+        return False
+    hsv = cv2.cvtColor(region, cv2.COLOR_RGB2HSV)
+    hue, sat, val = hsv[..., 0].astype(np.int32) * 2, hsv[..., 1], hsv[..., 2]
+    blue: np.ndarray = ((hue >= 200) & (hue <= 260) & (sat > 120) & (val > 90) & (val < 235)).astype(np.uint8)
+    blue = cv2.morphologyEx(blue, cv2.MORPH_OPEN, np.ones((2, 2), np.uint8))
+    n, _, stats, _ = cv2.connectedComponentsWithStats(blue, connectivity=8)
+    if any(max(stats[i, 2], stats[i, 3]) >= 0.8 * grid.box_h for i in range(1, n)):
+        return True
+    dx0 = max(0, int(grid.cols[0][0] - grid.pitch / 2) - x0)
+    dx1 = int(grid.cols[-1][1] + grid.pitch / 2) - x0
+    days = region[:, dx0:dx1]
+    gray = cv2.cvtColor(days, cv2.COLOR_RGB2GRAY)
+    black_ink = ((gray < 110) & (sat[:, dx0:dx1] < 90)).astype(np.uint8) * 255
+    lines = cv2.HoughLinesP(black_ink, 1, np.pi / 180, threshold=max(10, int(0.8 * grid.box_h)),
+                            minLineLength=int(1.2 * grid.box_h), maxLineGap=2)
+    for lx0, ly0, lx1, ly1 in (lines.reshape(-1, 4) if lines is not None else []):
+        angle = abs(np.degrees(np.arctan2(ly1 - ly0, lx1 - lx0))) % 180
+        if 15 <= min(angle, 180 - angle) <= 75:
+            return True
+    return False
+
+
 def _runs(mask_1d: np.ndarray, min_len: int = 1) -> list[tuple[int, int]]:
     out, start = [], None
     for i, on in enumerate(mask_1d):
@@ -805,6 +837,7 @@ class _SheetReader:
         self.monochrome = float(np.percentile(saturation, 99.9)) < 25
 
     def read(self) -> ParsedSheet:
+        self.marks_over_grid = _marks_over_grid(self.rgb, self.grid)
         if self.monochrome:
             self.sheet.warnings.append("screenshot has no colour — approval statuses cannot be read")
         self._read_day_header()
@@ -1567,6 +1600,10 @@ class _SheetReader:
                 "check": f"{label} grand total", "expected": printed, "actual": got,
                 "ok": printed is not None and abs(got - printed) < 1e-6,
             })
+        if getattr(self, "marks_over_grid", False):
+            s.warnings.append("handwriting over the table — values may have been changed on paper")
+            checks.append({"check": "no handwriting over the table", "expected": "none",
+                           "actual": "marks found", "ok": False})
         if s.totals and "TOTAL" not in s.totals:
             checks.append({"check": "grand total row found", "expected": "a grand total row", "actual": None,
                            "ok": False})

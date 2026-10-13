@@ -286,3 +286,43 @@ def test_an_unused_hour_type_row_must_total_zero():
     r.sheet.totals_printed_total["TOTAL"] = 24
     r._reconcile()
     assert r.sheet.status == "NEEDS_REVIEW"
+
+
+def _grid_for(img):
+    from app.services.extraction.timesheet_grid import _locate_grid
+
+    return _locate_grid(img)
+
+
+def test_a_struck_through_cell_is_detected_as_handwriting():
+    # measured: 9 of 20 sheets with a handwritten correction were verified on the printed value
+    import cv2
+
+    from app.services.extraction.timesheet_grid import _marks_over_grid
+
+    img = _box_grid()
+    for ink in ((30, 30, 35), (25, 45, 160)):          # black and blue pen
+        marked = img.copy()
+        cv2.line(marked, (110, 98), (150, 120), ink, 2, cv2.LINE_AA)   # across one day box
+        assert _marks_over_grid(marked, _grid_for(img))
+
+
+def test_printed_digits_and_rulings_are_not_handwriting():
+    import cv2
+
+    from app.services.extraction.timesheet_grid import _marks_over_grid
+
+    img = _box_grid()
+    for c in range(28):
+        cv2.putText(img, "7.5", (44 + c * 36, 76), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (31, 41, 55), 1, cv2.LINE_AA)
+    assert not _marks_over_grid(img, _grid_for(img))
+
+
+def test_camera_noise_is_not_mistaken_for_blue_ink():
+    # measured: a raw count of saturated blue pixels flagged 18 of 20 noisy sheets
+    from app.services.extraction.timesheet_grid import _marks_over_grid
+
+    img = _box_grid()
+    noisy = np.clip(img.astype(np.int16) + np.random.default_rng(3).normal(0, 20, img.shape), 0, 255)
+    noisy = noisy.astype(np.uint8)
+    assert not _marks_over_grid(noisy, _grid_for(img))
