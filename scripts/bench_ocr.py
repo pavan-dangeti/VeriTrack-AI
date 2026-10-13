@@ -355,6 +355,10 @@ def _corrections(img: np.ndarray, count: int, geo: dict, sheet: dict, rng: rando
 
 # ---- scoring -----------------------------------------------------------------------------------------
 
+VERIFIED_MEANS = ("**Verified** means every day's hours agree with the printed row and sheet totals, the employee ID "
+                  "and period were read, and every row's task was read clearly enough to tell leave from work. "
+                  "Project and task codes, names, roles and task titles are not cross-checked.")
+
 LINE_FIELDS = ("uom", "project_id", "sub_project", "sub_project_id")
 UNCHECKED = {"employee_name", "supplier", "job_family", "sub_project", "project_id", "sub_project_id"}
 
@@ -487,27 +491,30 @@ def report(dirs: list[Path]) -> str:
         return "no results\n"
     meta = metas[0]
     lines = ["The `simulated_photo` group is generated from screenshots; no real photographs were tested.", "",
+             VERIFIED_MEANS, "",
              f"**{meta.get('set', 'unknown').capitalize()} set** (seed {meta.get('seed')}). "
              f"Engine **{meta['engine']}**, preprocessing **{'on' if meta['preprocess'] else 'off'}**, "
              f"`{meta['machine']}`, Python {meta['python']}, commit `{meta['commit']}`, {len(rows)} sheets.", "",
-             "| Group | Sheets | Exact | Verified, unchecked field wrong | Flagged | **Verified but wrong** | Error | "
+             "| Group | Sheets | Exact | Flagged | **Verified but wrong** | Verified, unchecked field wrong | Error | "
              "Field accuracy | Cell accuracy |", "|---|---|---|---|---|---|---|---|---|"]
     for label, sel in [("**All**", rows)] + [(t, [r for r in rows if r["type"] == t]) for t in DEGRADATIONS]:
         a = _agg(sel)
         if not a["n"]:
             continue
         o = a["outcomes"]
-        lines.append(f"| {label} | {a['n']} | {o['exact']} ({_pct(o['exact'], a['n'])}) | "
-                     f"{o['verified_unchecked_slip']} | {o['flagged']} | **{o['verified_wrong']}** | {o['error']} | "
+        lines.append(f"| {label} | {a['n']} | {o['exact']} ({_pct(o['exact'], a['n'])}) | {o['flagged']} | "
+                     f"**{o['verified_wrong']}** | {o['verified_unchecked_slip']} | {o['error']} | "
                      f"{_pct(*a['f'])} | {_pct(*a['c'])} |")
-    lines += ["", "By severity (exact / flagged / verified-but-wrong, of n):", "",
+    lines += ["", "By severity (exact / flagged / verified but wrong / verified with an unchecked field wrong, of n):",
+              "",
               "| Degradation | Low | Medium | High |", "|---|---|---|---|"]
     for t in DEGRADATIONS:
         cells = []
         for s in SEVERITIES:
             a = _agg(r for r in rows if r["type"] == t and r["severity"] == s)
             o = a["outcomes"]
-            cells.append(f"{o['exact']} / {o['flagged']} / {o['verified_wrong']} of {a['n']}" if a["n"] else "–")
+            cells.append(f"{o['exact']} / {o['flagged']} / {o['verified_wrong']} / {o['verified_unchecked_slip']} "
+                         f"of {a['n']}" if a["n"] else "–")
         lines.append(f"| {t} | " + " | ".join(cells) + " |")
     field_totals: dict[str, list[int]] = defaultdict(lambda: [0, 0])
     for r in rows:
