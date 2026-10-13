@@ -338,3 +338,27 @@ def test_a_missing_or_misaligned_task_blocks_verification(task):
     r = _reader([reg, nb], totals={"REG": [8, 8, 0, 0, 0], "NB": [0, 0, 8, 0, 0]}, printed={"REG": 16, "NB": 8})
     r._reconcile()
     assert r.sheet.status == "NEEDS_REVIEW"
+
+
+def test_rows_that_disagree_on_the_employee_id_block_verification():
+    # measured: a stamp over part of the ID column read '1004' for '100410' on some rows; the rows were forced
+    # to one value by majority and the sheet was verified with the short ID
+    a = _line(0, "REG", [8, 8, None, None, None], 16)
+    b = _line(1, "REG", [None, None, 8, None, None], 8)
+    a.person_id, b.person_id = "100410", "1004"
+    r = _reader([a, b], totals={"REG": [8, 8, 8, 0, 0]}, printed={"REG": 24})
+    r.sheet.person_id = ""
+    r._fill_sheet_identity()
+    r._reconcile()
+    assert r.sheet.status == "NEEDS_REVIEW"
+
+
+def test_an_unreadable_id_on_one_row_does_not_conflict():
+    a = _line(0, "REG", [8, 8, None, None, None], 16)
+    b = _line(1, "REG", [None, None, 8, None, None], 8)
+    a.person_id, b.person_id = "100410", ""
+    r = _reader([a, b], totals={"REG": [8, 8, 8, 0, 0]}, printed={"REG": 24})
+    r.sheet.person_id = ""
+    r._fill_sheet_identity()
+    r._reconcile()
+    assert r.sheet.verified and r.sheet.person_id == "100410"

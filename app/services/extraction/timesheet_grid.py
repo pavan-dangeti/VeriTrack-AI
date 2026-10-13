@@ -1414,6 +1414,9 @@ class _SheetReader:
             return max(set(vals), key=vals.count) if vals else ""
 
         s = self.sheet
+        # distinct IDs actually read before rows are aligned to the majority: if they differ, the majority
+        # may be the misread one (a stamp turned '100410' into '1004'), so the ID cannot count as verified
+        self.person_id_reads = sorted({ln.person_id for ln in self.lines if ln.person_id})
         s.person_id = majority([ln.person_id for ln in self.lines])
         s.supplier = majority([ln.supplier for ln in self.lines])
         s.job_family = majority([ln.job_family for ln in self.lines])
@@ -1634,6 +1637,10 @@ class _SheetReader:
             if AMBIGUOUS_LEAVE <= similarity < LEAVE_SIMILARITY and not ln.is_out_of_office:
                 checks.append({"check": f"row {ln.row_index + 1} task reads clearly as leave or work",
                                "expected": "leave or work", "actual": ln.sub_project, "ok": False})
+        reads = getattr(self, "person_id_reads", [])
+        if len(reads) > 1:
+            checks.append({"check": "employee ID the same on every row", "expected": s.person_id,
+                           "actual": ", ".join(reads), "ok": False})
         if not re.fullmatch(r"\d{3,}", s.person_id or ""):
             checks.append({"check": "employee ID readable", "expected": "employee ID",
                            "actual": s.person_id or None, "ok": False})
