@@ -1,6 +1,7 @@
 """OCR benchmark at realistic scale: generated timesheets, each with one controlled degradation.
 
     python -m scripts.bench_ocr generate --out bench-data [--count 220] [--seed 7]
+    python -m scripts.bench_ocr generate --out bench-heldout --seed 4729   # held-out set, see HELDOUT_SEED
     python -m scripts.bench_ocr run --data bench-data --out bench-out [--engine rapid|tesseract]
                                     [--preprocess] [--shard 1/4]
     python -m scripts.bench_ocr report bench-out [more result dirs ...] > report.md
@@ -48,6 +49,12 @@ from PIL import Image
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+
+# Development set: seed 7, used while fixing the reader. Held-out set: seed 4729, fixed on 2026-10-13 before
+# any of its sheets were generated, and only read once the fixes were final. Same generator and degradations,
+# so it shows whether the fixes overfit the development sheets, not how the reader handles other kinds of input.
+DEV_SEED = 7
+HELDOUT_SEED = 4729
 
 DEGRADATIONS = ("clean", "blur", "skew", "noise", "jpeg", "shadow", "lowres", "stamp", "pen", "correction",
                 "simulated_photo")
@@ -142,6 +149,8 @@ def generate(out: Path, count: int, seed: int) -> None:
                            "expected": "flagged" if kind == "correction" else "exact"}
         browser.close()
     (out / "truth.json").write_text(json.dumps(truth, indent=1))
+    (out / "set.json").write_text(json.dumps({"seed": seed, "count": count,
+                                              "set": "held-out" if seed == HELDOUT_SEED else "development"}))
     print(f"wrote {count} sheets to {out}")
 
 
@@ -406,7 +415,10 @@ def run(data: Path, out: Path, engine: str, preprocess: bool, shard: str) -> Non
     names = [nm for i, nm in enumerate(sorted(truth)) if i % n == k - 1]
     out.mkdir(parents=True, exist_ok=True)
     (out / "failures").mkdir(exist_ok=True)
+    set_file = data / "set.json"
+    sheet_set = json.loads(set_file.read_text()) if set_file.exists() else {"set": "unknown", "seed": None}
     meta = {"engine": engine, "preprocess": preprocess, "machine": platform.machine(),
+            "set": sheet_set["set"], "seed": sheet_set["seed"],
             "python": platform.python_version(), "commit": _commit(), "shard": shard,
             "started": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
     (out / f"meta-{k}.json").write_text(json.dumps(meta))
@@ -475,6 +487,7 @@ def report(dirs: list[Path]) -> str:
         return "no results\n"
     meta = metas[0]
     lines = ["The `simulated_photo` group is generated from screenshots; no real photographs were tested.", "",
+             f"**{meta.get('set', 'unknown').capitalize()} set** (seed {meta.get('seed')}). "
              f"Engine **{meta['engine']}**, preprocessing **{'on' if meta['preprocess'] else 'off'}**, "
              f"`{meta['machine']}`, Python {meta['python']}, commit `{meta['commit']}`, {len(rows)} sheets.", "",
              "| Group | Sheets | Exact | Verified, unchecked field wrong | Flagged | **Verified but wrong** | Error | "
@@ -518,7 +531,7 @@ def main(argv: list[str]) -> int:
     g = sub.add_parser("generate")
     g.add_argument("--out", type=Path, default=ROOT / "bench-data")
     g.add_argument("--count", type=int, default=220)
-    g.add_argument("--seed", type=int, default=7)
+    g.add_argument("--seed", type=int, default=DEV_SEED)
     r = sub.add_parser("run")
     r.add_argument("--data", type=Path, default=ROOT / "bench-data")
     r.add_argument("--out", type=Path, default=ROOT / "bench-out")

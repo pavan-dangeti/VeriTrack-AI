@@ -18,9 +18,14 @@ on:
         description: Number of sheets
         type: number
         default: 220
+      seed:
+        description: Sheet set (7 = development, 4729 = held-out)
+        type: choice
+        options: ["7", "4729"]
+        default: "7"
 
 concurrency:
-  group: ocr-benchmark-${{ github.ref }}-${{ inputs.engine }}-${{ inputs.preprocess }}
+  group: ocr-benchmark-${{ github.ref }}-${{ inputs.engine }}-${{ inputs.preprocess }}-${{ inputs.seed }}
   cancel-in-progress: true
 
 jobs:
@@ -46,7 +51,8 @@ jobs:
       - name: Generate
         env:
           COUNT: ${{ inputs.count }}
-        run: python -m scripts.bench_ocr generate --out bench-data --count "$COUNT"
+          SEED: ${{ inputs.seed }}
+        run: python -m scripts.bench_ocr generate --out bench-data --count "$COUNT" --seed "$SEED"
       - uses: actions/upload-artifact@v4
         with:
           name: bench-data
@@ -113,6 +119,6 @@ jobs:
           python -m scripts.bench_ocr report bench-report | tee bench-report/report.md >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
         with:
-          name: ocr-benchmark-${{ inputs.engine }}-${{ inputs.preprocess && 'preprocessed' || 'raw' }}
+          name: ocr-benchmark-${{ inputs.seed == '4729' && 'heldout' || 'dev' }}-${{ inputs.engine }}-${{ inputs.preprocess && 'preprocessed' || 'raw' }}
           path: bench-report
           retention-days: 90
