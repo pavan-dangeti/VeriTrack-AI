@@ -6,6 +6,7 @@ and four sample timesheets (app/demo/), already processed and analysed.
 """
 
 import asyncio
+import uuid
 import zlib
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -16,13 +17,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.core.security import hash_password, verify_password
+from app.db.tenant import SYSTEM, tenant
 from app.models.analysis import AnalysisRun, GeneratedReport
 from app.models.audit_log import AuditLog
 from app.models.employees import Employee
 from app.models.leaves import CompanyLeave
 from app.models.uploads import BatchKind, UploadBatch, UploadedFile
 from app.models.user import AuthType, User, UserRole
-from app.services import audit_service
+from app.services import audit_service, org_service
 
 log = get_logger("demo")
 
@@ -47,6 +49,15 @@ _LOCK_ID = zlib.crc32(b"veritrack-demo-reset")
 
 def enabled() -> bool:
     return bool(settings.demo_email and settings.demo_password)
+
+
+async def org_id() -> uuid.UUID:
+    """The demo account lives in the bootstrap organisation; its functions below run with that tenant set."""
+    from app.db.session import get_session_factory
+
+    with tenant(SYSTEM):
+        async with get_session_factory()() as db:
+            return await org_service.bootstrap_org_id(db)
 
 
 def is_demo(user: User | None) -> bool:
@@ -158,8 +169,9 @@ async def run_scheduler(check_every: timedelta = timedelta(hours=1)) -> None:
 
     while True:
         try:
-            async with get_session_factory()() as db:
-                await reset_if_due(db)
+            with tenant(await org_id()):
+                async with get_session_factory()() as db:
+                    await reset_if_due(db)
         except (Exception, SystemExit) as exc:  # noqa: BLE001 — a failed reset (or bad DEMO_EMAIL) must not stop the API
             log.warning("demo_reset_failed", error=str(exc)[:200])
         await asyncio.sleep(check_every.total_seconds())

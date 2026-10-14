@@ -29,13 +29,16 @@ def run_coro_blocking(coro):
 def process_batch_task(self, batch_id: str) -> dict:
     def _inner():
         from app.db.session import fresh_engine_and_factory
+        from app.db.tenant import tenant
         from app.services.batch_service import run_batch_processing
+        from app.services.jobs import batch_org
 
         async def go():
             engine, factory = fresh_engine_and_factory()
             try:
-                async with factory() as db:
-                    return await run_batch_processing(db, batch_id)
+                with tenant(await batch_org(factory, batch_id)):
+                    async with factory() as db:
+                        return await run_batch_processing(db, batch_id)
             finally:
                 await engine.dispose()
 
@@ -48,14 +51,17 @@ def process_batch_task(self, batch_id: str) -> dict:
 def run_analyze_task(self, batch_id: str, triggered_by: str | None = None, run_id: str | None = None) -> dict:
     def _inner():
         from app.db.session import fresh_engine_and_factory
+        from app.db.tenant import tenant
         from app.services.analyze_service import execute_analysis
+        from app.services.jobs import batch_org
 
         async def go():
             engine, factory = fresh_engine_and_factory()
             try:
-                async with factory() as db:
-                    actor = uuid.UUID(triggered_by) if triggered_by else None
-                    return await execute_analysis(db, batch_id, triggered_by=actor, run_id=run_id)
+                with tenant(await batch_org(factory, batch_id)):
+                    async with factory() as db:
+                        actor = uuid.UUID(triggered_by) if triggered_by else None
+                        return await execute_analysis(db, batch_id, triggered_by=actor, run_id=run_id)
             finally:
                 await engine.dispose()
 

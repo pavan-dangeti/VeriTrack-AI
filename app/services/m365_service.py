@@ -118,14 +118,15 @@ def validate_id_token(id_token: str, expected_nonce: str | None = None) -> dict:
     return claims
 
 
-async def domain_is_approved(db, email: str) -> bool:
+async def approved_domain_org(db, email: str):
+    """The organisation that approved this e-mail's domain, or None. A domain belongs to one organisation."""
     from sqlalchemy import select
 
     from app.models.m365_domain import ApprovedM365Domain
 
     domain = email.rsplit("@", 1)[-1].strip().lower()
-    stmt = select(ApprovedM365Domain).where(
+    stmt = select(ApprovedM365Domain.org_id).where(
         ApprovedM365Domain.domain == domain,
         ApprovedM365Domain.is_active.is_(True),
     )
-    return (await db.execute(stmt)).scalar_one_or_none() is not None
+    return (await db.execute(stmt)).scalar_one_or_none()
