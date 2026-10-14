@@ -6,9 +6,10 @@ from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
+from app.models.organization import TenantScoped
 
 
-class ApprovedM365Domain(Base):
+class ApprovedM365Domain(TenantScoped, Base):
     __tablename__ = "approved_m365_domains"
 
     domain: Mapped[str] = mapped_column(Text, primary_key=True)

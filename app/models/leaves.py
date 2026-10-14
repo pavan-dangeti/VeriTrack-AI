@@ -6,9 +6,10 @@ from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
+from app.models.organization import TenantScoped
 
 
-class CompanyLeave(Base):
+class CompanyLeave(TenantScoped, Base):
     """One leave day in the company leave register. Every timesheet 'Out Of Office' day needs a matching row here;
     unique per manager/employee/day so re-uploads are idempotent."""
 

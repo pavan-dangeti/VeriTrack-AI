@@ -7,6 +7,7 @@ from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
+from app.models.organization import TenantScoped
 
 
 class UserRole(enum.StrEnum):
@@ -21,7 +22,7 @@ class AuthType(enum.StrEnum):  # noqa: S105 - role labels, not secrets
     PASSWORD = "PASSWORD"  # noqa: S105 - auth-type label, not a secret
 
 
-class User(Base):
+class User(TenantScoped, Base):
     __tablename__ = "users"
 
     id: Mapped[uuid.UUID] = mapped_column(

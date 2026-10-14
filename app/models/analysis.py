@@ -18,6 +18,7 @@ from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
+from app.models.organization import TenantScoped
 
 
 class AnalysisStatus(enum.StrEnum):
@@ -38,7 +39,7 @@ class ReportKind(enum.StrEnum):
     EXCEL_3TAB = "EXCEL_3TAB"
 
 
-class AnalysisRun(Base):
+class AnalysisRun(TenantScoped, Base):
     __tablename__ = "analysis_runs"
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -79,7 +80,7 @@ class AnalysisRun(Base):
     )
 
 
-class ViolationResult(Base):
+class ViolationResult(TenantScoped, Base):
     """One row per employee per analysis run. The UNIQUE(run_id, employee_code)
     constraint IS the dedup guarantee — one email per employee per run."""
 
@@ -116,7 +117,7 @@ class ViolationResult(Base):
     run: Mapped["AnalysisRun"] = relationship(back_populates="violations_list")
 
 
-class GeneratedReport(Base):
+class GeneratedReport(TenantScoped, Base):
     __tablename__ = "generated_reports"
 
     id: Mapped[uuid.UUID] = mapped_column(
