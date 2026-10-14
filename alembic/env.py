@@ -22,6 +22,9 @@ def include_object(obj, name, type_, reflected, compare_to):
 
 
 def do_run_migrations(connection: Connection) -> None:
+    # migrations work on every organisation's rows; row-level security (0008) would hide them
+    connection.exec_driver_sql("SELECT set_config('app.rls_bypass', 'on', false)")
+    connection.commit()  # a session-level setting; leave no open transaction for alembic to nest into
     context.configure(
         connection=connection,
         target_metadata=target_metadata,
