@@ -3,6 +3,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 
 from app.api.deps import DB, require_role
 from app.core.config import settings
@@ -147,5 +148,12 @@ async def approve_domain(body: DomainIn, actor: MasterAdminOnly, db: DB):
         existing.is_active = True
     else:
         db.add(ApprovedM365Domain(domain=domain, created_by=actor.id))
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError as exc:
+        # a domain belongs to one organisation; another one has it (row-level security hid it above)
+        await db.rollback()
+        raise HTTPException(
+            409, detail={"code": "domain_taken", "message": "This domain is approved by another organisation"}
+        ) from exc
     return {"domain": domain, "is_active": True}
