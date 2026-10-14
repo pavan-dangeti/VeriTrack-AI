@@ -56,6 +56,11 @@ browser ──► https://<app>.vercel.app  ──(/api/* rewrite)──► http
 > 3. Deploy. Migrations run on boot, and the Master Admin is created from
 >    `ADMIN_EMAIL` / `ADMIN_PASSWORD`.
 >
+> The connecting role needs `CREATEROLE`: a migration creates `veritrack_app`, the role every
+> transaction runs as so row-level security always applies. Check it in Neon's SQL editor with
+> `SELECT rolcreaterole FROM pg_roles WHERE rolname = current_user;`. If it is missing, the
+> migration fails, the new deploy does not start, and the previous one keeps serving.
+>
 > **No persistent disk?** Set `STORAGE_BACKEND=s3` with any S3-compatible bucket
 > (`S3_BUCKET`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`, `S3_ENDPOINT_URL` for R2/MinIO)
 > and remove the `disk:` block.
