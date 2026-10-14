@@ -104,7 +104,8 @@ def render_html(sheet: dict, font: str) -> str:
         body.append(
             f"<tr><td>{sheet['person_id']}</td><td>{sheet['supplier']}</td><td>{sheet['job_family']}</td>"
             f"<td class='code'>{ln['uom']}</td><td>{ln['project_id']}</td><td class='sp'>{ln['sub_project']}</td>"
-            f"<td>{ln['sub_project_id']}</td><td></td>{''.join(cells)}<td class='tot'>{ln['total']}</td></tr>"
+            f"<td>{ln['sub_project_id']}</td><td>{ln.get('notes', '')}</td>{''.join(cells)}"
+            f"<td class='tot'>{ln['total']}</td></tr>"
         )
 
     def totals_row(label, kind):

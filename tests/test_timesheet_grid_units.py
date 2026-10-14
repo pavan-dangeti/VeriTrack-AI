@@ -66,10 +66,21 @@ def test_clean_name(raw, clean):
     assert _clean_name(raw) == clean
 
 
-def _reader(lines, totals=None, printed=None, period=(2026, 7)):
+def _reader(lines, totals=None, printed=None, period=(2026, 7), days=31):
+    """A reader over hand-made lines: the first days are given, the rest of July 2026 is empty."""
+    for ln in lines:
+        ln.cells += [SheetCell(day=d, hours=None, status="EMPTY", confidence=0.99)
+                     for d in range(len(ln.cells) + 1, days + 1)]
+    totals = {k: v + [0] * (days - len(v)) for k, v in (totals or {}).items()}
+    printed = dict(printed or {})
+    if totals and "TOTAL" not in totals:   # real sheets end with a grand total row; mirror the per-type rows
+        totals["TOTAL"] = [sum(v[d] or 0 for v in totals.values()) for d in range(days)]
+        known = [v for v in printed.values() if v is not None]
+        printed["TOTAL"] = sum(known) if known else None
     r = _SheetReader.__new__(_SheetReader)
-    r.sheet = ParsedSheet(days_in_month=5, totals=totals or {}, totals_printed_total=printed or {})
+    r.sheet = ParsedSheet(days_in_month=days, totals=totals, totals_printed_total=printed)
     r.sheet.year, r.sheet.month = period
+    r.sheet.person_id = "100001"
     r.lines = lines
     r.day_offset = 0
     return r
@@ -146,3 +157,250 @@ def test_a_token_on_the_next_line_does_not_hide_a_missed_line():
     office_token = (381, 245, 423, 266)
     assert not _covers(office_token, (382, 234, 426, 244))   # 'Out Of' line: still recovered
     assert _covers(office_token, (382, 251, 421, 261))       # 'Office' line: already read
+
+
+def test_a_misread_totals_label_cannot_verify_vacuously():
+    # measured: a skewed capture read the only totals row as 'ALNB'; no line has that hour type, so
+    # nothing was compared and the sheet was marked verified
+    ln = _line(0, "REG", [8, 8, 8, None, None], 24)
+    r = _reader([ln], totals={"ALNB": [None] * 5}, printed={"ALNB": None})
+    r._reconcile()
+    assert r.sheet.status == "NEEDS_REVIEW"
+
+
+def test_every_hour_type_on_the_sheet_needs_its_totals_row():
+    reg = _line(0, "REG", [8, 8, None, None, None], 16)
+    nb = _line(1, "NB", [None, None, 8, None, None], 8)
+    r = _reader([reg, nb], totals={"REG": [8, 8, 0, 0, 0]}, printed={"REG": 16})
+    r._reconcile()
+    assert r.sheet.status == "NEEDS_REVIEW"
+
+
+def test_a_partial_grid_is_never_verified():
+    # measured: a photo-like capture found only 21 of February's 28 day columns and one of five rows
+    ln = _line(0, "REG", [8, 8, 8, None, None], 24)
+    r = _reader([ln], totals={"REG": [8, 8, 8, 0, 0]}, printed={"REG": 24}, period=(2026, 2), days=21)
+    r._reconcile()
+    assert r.sheet.status == "NEEDS_REVIEW"
+
+
+def _cell_with(text: str, h: int = 15, w: int = 30) -> np.ndarray:
+    import cv2
+
+    img = np.full((h, w, 3), 255, np.uint8)
+    cv2.putText(img, text, (3, h - 3), cv2.FONT_HERSHEY_SIMPLEX, h / 32, (30, 30, 30), 1, cv2.LINE_AA)
+    return img
+
+
+def test_a_decimal_point_survives_speck_removal():
+    # measured: '3.5' reached the recogniser as '35' (confidence 1.0) because the point was erased as noise
+    _, mask, _ = _glyphs(_cell_with("3.5"))
+    import cv2
+
+    n, *_ = cv2.connectedComponentsWithStats(mask.astype(np.uint8), connectivity=8)
+    assert n - 1 == 3                       # '3', '.', '5'
+
+
+def test_a_stray_speck_away_from_the_baseline_is_still_removed():
+    cell = _cell_with("35")
+    cell[2:4, 14:16] = 30                   # speck near the top, between the digits
+    _, mask, _ = _glyphs(cell)
+    import cv2
+
+    n, *_ = cv2.connectedComponentsWithStats(mask.astype(np.uint8), connectivity=8)
+    assert n - 1 == 2
+
+
+def _box_grid(shadow: float | None = None) -> np.ndarray:
+    import cv2
+
+    img = np.full((260, 1100, 3), 252, np.uint8)
+    for r in range(3):
+        for c in range(28):
+            x, y = 40 + c * 36, 60 + r * 40
+            cv2.rectangle(img, (x, y), (x + 30, y + 22), (150, 160, 175), 1)
+    if shadow is not None:   # light falls off from right to left, down to `shadow` of full brightness
+        img = (img * np.linspace(shadow, 1.0, img.shape[1])[None, :, None]).astype(np.uint8)
+    return img
+
+
+def test_uneven_lighting_no_longer_hides_the_day_grid():
+    from app.services.extraction.timesheet_grid import _box_lattice, _flatten_lighting
+
+    shadowed = _box_grid(shadow=0.55)
+    assert _box_lattice(shadowed) is None                   # measured: shadowed sheets were refused
+    lattice = _box_lattice(_flatten_lighting(shadowed))
+    assert lattice is not None and len(lattice[1]) == 28 and len(lattice[0]) == 3
+
+
+def test_evenly_lit_screenshots_are_left_untouched():
+    from app.services.extraction.timesheet_grid import _flatten_lighting
+
+    clean = _box_grid()
+    assert _flatten_lighting(clean) is clean
+
+
+def test_a_sheet_without_a_readable_employee_id_is_never_verified():
+    # measured: a heavily shadowed sheet read every hour right but the employee ID as '' and was verified
+    ln = _line(0, "REG", [8, 8, 8, None, None], 24)
+    r = _reader([ln], totals={"REG": [8, 8, 8, 0, 0]}, printed={"REG": 24})
+    r.sheet.person_id = ""
+    r._reconcile()
+    assert r.sheet.status == "NEEDS_REVIEW"
+
+
+@pytest.mark.parametrize("task", ["Office", "Out Of", "Payments Out Of"])
+def test_a_task_that_could_be_leave_or_work_blocks_verification(task):
+    # measured: on a skewed sheet the wrapped 'Out Of / Office' cell split into 'Payments Out Of' and
+    # 'Office', the leave row was missed, and the sheet was verified
+    ln = _line(0, "NB", [8, 8, 8, None, None], 24)
+    ln.sub_project = task
+    r = _reader([ln], totals={"NB": [8, 8, 8, 0, 0]}, printed={"NB": 24})
+    r._reconcile()
+    assert r.sheet.status == "NEEDS_REVIEW"
+
+
+@pytest.mark.parametrize("task", ["Out Of Office", "Support", "Customer Portal"])
+def test_clear_leave_and_work_tasks_still_verify(task):
+    ln = _line(0, "NB", [8, 8, 8, None, None], 24)
+    ln.sub_project = task
+    r = _reader([ln], totals={"NB": [8, 8, 8, 0, 0]}, printed={"NB": 24})
+    r._reconcile()
+    assert r.sheet.status == "VERIFIED"
+
+
+def test_a_sheet_whose_grand_total_row_was_not_read_is_never_verified():
+    # measured: every hour right, but the grand total row was not found and the sheet was verified on the
+    # per-type rows alone; 'verified' promises agreement with the sheet totals too
+    ln = _line(0, "REG", [8, 8, 8, None, None], 24)
+    r = _reader([ln], totals={"REG": [8, 8, 8, 0, 0]}, printed={"REG": 24})
+    del r.sheet.totals["TOTAL"], r.sheet.totals_printed_total["TOTAL"]
+    r._reconcile()
+    assert r.sheet.status == "NEEDS_REVIEW"
+
+
+def test_an_unused_hour_type_row_must_total_zero():
+    # measured: no row was non-billable, but the NB grand total was misread as 5 and the sheet verified
+    ln = _line(0, "REG", [8, 8, 8, None, None], 24)
+    r = _reader([ln], totals={"REG": [8, 8, 8, 0, 0], "NB": [0, 0, 0, 0, 0]}, printed={"REG": 24, "NB": 5})
+    r.sheet.totals_printed_total["TOTAL"] = 24
+    r._reconcile()
+    assert r.sheet.status == "NEEDS_REVIEW"
+
+
+def _grid_for(img):
+    from app.services.extraction.timesheet_grid import _locate_grid
+
+    return _locate_grid(img)
+
+
+def test_a_struck_through_cell_is_detected_as_handwriting():
+    # measured: 9 of 20 sheets with a handwritten correction were verified on the printed value
+    import cv2
+
+    from app.services.extraction.timesheet_grid import _marks_over_grid
+
+    img = _box_grid()
+    for ink in ((30, 30, 35), (25, 45, 160)):          # black and blue pen
+        marked = img.copy()
+        cv2.line(marked, (110, 98), (150, 120), ink, 2, cv2.LINE_AA)   # across one day box
+        assert _marks_over_grid(marked, _grid_for(img))
+
+
+def test_printed_digits_and_rulings_are_not_handwriting():
+    import cv2
+
+    from app.services.extraction.timesheet_grid import _marks_over_grid
+
+    img = _box_grid()
+    for c in range(28):
+        cv2.putText(img, "7.5", (44 + c * 36, 76), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (31, 41, 55), 1, cv2.LINE_AA)
+    assert not _marks_over_grid(img, _grid_for(img))
+
+
+def test_camera_noise_is_not_mistaken_for_blue_ink():
+    # measured: a raw count of saturated blue pixels flagged 18 of 20 noisy sheets
+    from app.services.extraction.timesheet_grid import _marks_over_grid
+
+    img = _box_grid()
+    noisy = np.clip(img.astype(np.int16) + np.random.default_rng(3).normal(0, 20, img.shape), 0, 255)
+    noisy = noisy.astype(np.uint8)
+    assert not _marks_over_grid(noisy, _grid_for(img))
+
+
+@pytest.mark.parametrize("task", ["", "NB", "REG"])
+def test_a_missing_or_misaligned_task_blocks_verification(task):
+    # measured: a stamp over the column headers shifted the text columns, the Task column read the hour
+    # type ('REG', 'NB'), the leave row was missed and the sheet was verified
+    reg = _line(0, "REG", [8, 8, None, None, None], 16)
+    nb = _line(1, "NB", [None, None, 8, None, None], 8)
+    nb.sub_project = task
+    r = _reader([reg, nb], totals={"REG": [8, 8, 0, 0, 0], "NB": [0, 0, 8, 0, 0]}, printed={"REG": 16, "NB": 8})
+    r._reconcile()
+    assert r.sheet.status == "NEEDS_REVIEW"
+
+
+def test_rows_that_disagree_on_the_employee_id_block_verification():
+    # measured: a stamp over part of the ID column read '1004' for '100410' on some rows; the rows were forced
+    # to one value by majority and the sheet was verified with the short ID
+    a = _line(0, "REG", [8, 8, None, None, None], 16)
+    b = _line(1, "REG", [None, None, 8, None, None], 8)
+    a.person_id, b.person_id = "100410", "1004"
+    r = _reader([a, b], totals={"REG": [8, 8, 8, 0, 0]}, printed={"REG": 24})
+    r.sheet.person_id = ""
+    r._fill_sheet_identity()
+    r._reconcile()
+    assert r.sheet.status == "NEEDS_REVIEW"
+
+
+def test_an_unreadable_id_on_one_row_does_not_conflict():
+    a = _line(0, "REG", [8, 8, None, None, None], 16)
+    b = _line(1, "REG", [None, None, 8, None, None], 8)
+    a.person_id, b.person_id = "100410", ""
+    r = _reader([a, b], totals={"REG": [8, 8, 8, 0, 0]}, printed={"REG": 24})
+    r.sheet.person_id = ""
+    r._fill_sheet_identity()
+    r._reconcile()
+    assert r.sheet.verified and r.sheet.person_id == "100410"
+
+
+def _rotated(img: np.ndarray, angle: float) -> np.ndarray:
+    from PIL import Image
+
+    return np.asarray(Image.fromarray(img).rotate(angle, resample=Image.BICUBIC, expand=True, fillcolor="white"))
+
+
+def _ruled_grid() -> np.ndarray:
+    import cv2
+
+    img = _box_grid()
+    for y in (50, 92, 132, 172):                 # table rulings between the rows
+        cv2.line(img, (20, y), (1080, y), (226, 232, 240), 1)
+    return img
+
+
+def _row_tilt(img: np.ndarray) -> float:
+    """Vertical spread (px) of the day boxes along the first row: 0 when the page is level."""
+    from app.services.extraction.timesheet_grid import _box_lattice
+
+    _rows, _cols, boxes, _h, _p = _box_lattice(img)
+    ys = [y + h / 2 for (r, _c), (_x, y, _w, h) in boxes.items() if r == 0]
+    return max(ys) - min(ys)
+
+
+@pytest.mark.parametrize("angle", [1.5, -1.0])
+def test_a_rotated_sheet_is_levelled_before_it_is_read(angle):
+    # measured: every sheet skewed by 0.8-3 degrees was flagged; across a wide page a tilted row drifts by more
+    # than a row height, so text and cells land in the wrong rows
+    from app.services.extraction.timesheet_grid import _deskew
+
+    tilted = _rotated(_ruled_grid(), angle)
+    assert _row_tilt(tilted) > 15
+    assert _row_tilt(_deskew(tilted)) <= 2
+
+
+def test_a_straight_screenshot_is_left_untouched_by_deskew():
+    from app.services.extraction.timesheet_grid import _deskew
+
+    img = _ruled_grid()
+    assert _deskew(img) is img

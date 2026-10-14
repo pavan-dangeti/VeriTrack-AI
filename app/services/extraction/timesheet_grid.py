@@ -36,6 +36,10 @@ TEXT_COLUMNS: tuple[tuple[str, tuple[str, ...]], ...] = (
 )
 # "Employee  NAME" in the page header — tolerant of OCR slips like 'Emp1oyee' / 'Employe'
 _EMPLOYEE = re.compile(r"^\s*emp[l1i]oye{1,2}\s*[,.:;]?\s*(.*)$", re.IGNORECASE)
+# a task this similar to 'Out Of Office' is leave (allowing OCR slips); between AMBIGUOUS_LEAVE and that it
+# could be either, e.g. half of a wrapped 'Out Of / Office' cell; ordinary task names score below 0.35
+LEAVE_SIMILARITY = 0.85
+AMBIGUOUS_LEAVE = 0.4
 SPLIT_SCORE = 0.8499  # marker confidence for text split across columns by char position
 _LABELS = sorted(
     ((key, alias.replace(" ", "")) for key, aliases in TEXT_COLUMNS for alias in aliases),
@@ -255,6 +259,63 @@ class _Ocr:
         return [(_ascii(str(t)), float(s)) for t, s in results]
 
 
+class _TesseractOcr:
+    """The same interface as _Ocr, backed by Tesseract: the comparison engine in the OCR benchmark."""
+
+    def detect(self, image: np.ndarray, *, offset=(0, 0), scale: float = 1.0) -> list[dict]:
+        import pytesseract
+
+        if image.size == 0 or min(image.shape[:2]) < 8:
+            return []
+        work = cv2.resize(image, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC) if scale != 1.0 else image
+        d = pytesseract.image_to_data(work, config="--psm 11", output_type=pytesseract.Output.DICT)
+        words: dict[tuple[int, int, int], list[int]] = {}
+        for i, text in enumerate(d["text"]):
+            if text.strip() and float(d["conf"][i]) >= 0:
+                words.setdefault((d["block_num"][i], d["par_num"][i], d["line_num"][i]), []).append(i)
+        ox, oy = offset
+        tokens = []
+        for idx in words.values():
+            # one token per run of words on a line, split where the gap is wider than the text height
+            runs: list[list[int]] = [[idx[0]]]
+            for i in idx[1:]:
+                prev = runs[-1][-1]
+                gap = d["left"][i] - (d["left"][prev] + d["width"][prev])
+                (runs[-1].append(i) if gap <= 1.2 * max(d["height"][i], d["height"][prev]) else runs.append([i]))
+            for run in runs:
+                chars: list[tuple[str, float]] = []
+                for j, i in enumerate(run):
+                    text, x, w = _ascii(d["text"][i]), d["left"][i], d["width"][i]
+                    if j:
+                        prev = run[j - 1]
+                        chars.append((" ", (d["left"][prev] + d["width"][prev] + x) / 2 / scale + ox))
+                    chars += [(ch, (x + (k + 0.5) * w / len(text)) / scale + ox) for k, ch in enumerate(text)]
+                x0 = min(d["left"][i] for i in run) / scale + ox
+                x1 = max(d["left"][i] + d["width"][i] for i in run) / scale + ox
+                y0 = min(d["top"][i] for i in run) / scale + oy
+                y1 = max(d["top"][i] + d["height"][i] for i in run) / scale + oy
+                tokens.append({
+                    "text": " ".join(_ascii(d["text"][i]) for i in run).strip(),
+                    "score": float(np.mean([float(d["conf"][i]) for i in run])) / 100,
+                    "x0": x0, "x1": x1, "y0": y0, "y1": y1, "yc": (y0 + y1) / 2, "chars": chars, "angle": 0.0,
+                })
+        return tokens
+
+    def recognize(self, crops: list[np.ndarray]) -> list[tuple[str, float]]:
+        import pytesseract
+
+        out = []
+        for c in crops:
+            if c.size and c.shape[0] < 32:
+                f = 32 / max(1, c.shape[0])
+                c = cv2.resize(c, None, fx=f, fy=f, interpolation=cv2.INTER_CUBIC)
+            d = pytesseract.image_to_data(_pad(c), config="--psm 7", output_type=pytesseract.Output.DICT)
+            kept = [(t, float(cf)) for t, cf in zip(d["text"], d["conf"], strict=True) if t.strip() and float(cf) >= 0]
+            out.append((_ascii(" ".join(t for t, _ in kept)), float(np.mean([cf for _, cf in kept])) / 100 if kept
+                        else 0.0))
+        return out
+
+
 def _find_day_boxes(rgb: np.ndarray, threshold: int = 215) -> list[tuple[int, int, int, int]]:
     gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
     binary = (gray < threshold).astype(np.uint8) * 255
@@ -360,6 +421,44 @@ def _box_lattice_at(rgb: np.ndarray, threshold: int):
     return best[1] if best else None
 
 
+def _flatten_lighting(rgb: np.ndarray) -> np.ndarray:
+    """Uneven lighting (a shadow across the page) makes the fixed ink thresholds see dim paper as ink, so
+    the day boxes merge and no grid is found. The paper brightness is estimated everywhere (the brightest
+    pixel in a large neighbourhood, smoothed) and divided out. Evenly lit images are returned unchanged."""
+    gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
+    small = cv2.resize(gray, None, fx=0.125, fy=0.125, interpolation=cv2.INTER_AREA)
+    paper = cv2.GaussianBlur(cv2.dilate(small, np.ones((15, 15), np.uint8)), (0, 0), 5).astype(np.float32)
+    lo, hi = np.percentile(paper, 5), np.percentile(paper, 95)
+    if lo >= 0.9 * hi:
+        return rgb
+    full = cv2.resize(paper, (rgb.shape[1], rgb.shape[0]), interpolation=cv2.INTER_LINEAR)
+    return np.clip(rgb.astype(np.float32) * (250.0 / np.maximum(full, 1.0))[..., None], 0, 255).astype(np.uint8)
+
+
+def _deskew(rgb: np.ndarray) -> np.ndarray:
+    """A sheet captured at a slight angle (a rotated scan or screenshot): the day boxes no longer line up in
+    rows and columns, so no grid is found. The rotation is estimated from long near-horizontal lines (rows
+    of day boxes, table rulings) and undone when it is at least 0.3 degrees; straight images are returned
+    unchanged."""
+    from PIL import Image
+
+    gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
+    edges = cv2.Canny(gray, 30, 90)
+    lines = cv2.HoughLinesP(edges, 1, np.pi / 1800, threshold=100, minLineLength=int(0.25 * rgb.shape[1]),
+                            maxLineGap=8)
+    if lines is None:
+        return rgb
+    angles = [float(np.degrees(np.arctan2(y1 - y0, x1 - x0))) for x0, y0, x1, y1 in lines.reshape(-1, 4)]
+    angles = [a for a in angles if abs(a) <= 5]
+    if len(angles) < 2:
+        return rgb
+    angle = float(np.median(angles))
+    if abs(angle) < 0.3:
+        return rgb
+    return np.asarray(Image.fromarray(rgb).rotate(angle, resample=Image.Resampling.BICUBIC, expand=True,
+                                                  fillcolor="white"))
+
+
 def _estimate_scale(rgb: np.ndarray) -> float:
     lattice = _box_lattice(rgb)
     if lattice is not None:
@@ -391,6 +490,38 @@ def _locate_grid(rgb: np.ndarray) -> _Grid:
     table, hlines, vlines = _table_rulings(rgb, rows, cols, box_h, pitch)
     return _Grid(rows=rows, cols=cols, boxes=boxes, box_h=box_h, pitch=pitch,
                  table=table, hlines=hlines, vlines=vlines)
+
+
+def _marks_over_grid(rgb: np.ndarray, grid: _Grid) -> bool:
+    """Handwriting over the table. A struck-through value with a new number written beside it is invisible to
+    the reader while the printed totals still agree, so such a sheet must not be verified. Two cues:
+    - a connected stroke of saturated blue ink (the page has no saturated blue; scattered noise pixels are
+      not connected, so they are removed first)
+    - a long diagonal stroke of dark, unsaturated ink (black pen) among the day boxes: the page itself has
+      only horizontal and vertical lines there, digits are short, and the coloured fills are saturated."""
+    x0, y0, x1, y1 = (max(0, int(v)) for v in grid.table)
+    region = rgb[y0:y1, x0:x1]
+    if region.size == 0:
+        return False
+    hsv = cv2.cvtColor(region, cv2.COLOR_RGB2HSV)
+    hue, sat, val = hsv[..., 0].astype(np.int32) * 2, hsv[..., 1], hsv[..., 2]
+    blue: np.ndarray = ((hue >= 200) & (hue <= 260) & (sat > 120) & (val > 90) & (val < 235)).astype(np.uint8)
+    blue = cv2.morphologyEx(blue, cv2.MORPH_OPEN, np.ones((2, 2), np.uint8))
+    n, _, stats, _ = cv2.connectedComponentsWithStats(blue, connectivity=8)
+    if any(max(stats[i, 2], stats[i, 3]) >= 0.8 * grid.box_h for i in range(1, n)):
+        return True
+    dx0 = max(0, int(grid.cols[0][0] - grid.pitch / 2) - x0)
+    dx1 = int(grid.cols[-1][1] + grid.pitch / 2) - x0
+    days = region[:, dx0:dx1]
+    gray = cv2.cvtColor(days, cv2.COLOR_RGB2GRAY)
+    black_ink = ((gray < 110) & (sat[:, dx0:dx1] < 90)).astype(np.uint8) * 255
+    lines = cv2.HoughLinesP(black_ink, 1, np.pi / 180, threshold=max(10, int(0.8 * grid.box_h)),
+                            minLineLength=int(1.2 * grid.box_h), maxLineGap=2)
+    for lx0, ly0, lx1, ly1 in (lines.reshape(-1, 4) if lines is not None else []):
+        angle = abs(np.degrees(np.arctan2(ly1 - ly0, lx1 - lx0))) % 180
+        if 15 <= min(angle, 180 - angle) <= 75:
+            return True
+    return False
 
 
 def _runs(mask_1d: np.ndarray, min_len: int = 1) -> list[tuple[int, int]]:
@@ -526,9 +657,11 @@ def _glyphs(region: np.ndarray, min_height_frac: float = 0.25):
     n, labels, stats, _ = cv2.connectedComponentsWithStats(ink, connectivity=8)
     keep = np.zeros_like(ink, dtype=bool)
     min_area = max(3, int(0.006 * h * w))
+    glyphs: list[tuple[int, int, int, int]] = []
+    specks: list[tuple[int, int, int, int, int]] = []
     for i in range(1, n):
         x, y, cw, ch, area = stats[i]
-        if area < min_area:
+        if area < 2:
             continue
         touches_lr = x == 0 or x + cw >= w
         touches_tb = y == 0 or y + ch >= h
@@ -538,9 +671,22 @@ def _glyphs(region: np.ndarray, min_height_frac: float = 0.25):
             continue                       # horizontal border remnant
         if ch >= 0.92 * h and cw <= 3:
             continue                       # a ruling through the cell
-        if ch < min_height_frac * h and cw < min_height_frac * h:
-            continue                       # speck
+        if area < min_area or (ch < min_height_frac * h and cw < min_height_frac * h):
+            specks.append((x, y, cw, ch, i))
+            continue
         keep |= labels == i
+        glyphs.append((x, y, cw, ch))
+    # A decimal point is speck-sized too, but it sits on the digits' baseline between two of them;
+    # erasing it turned '3.5' into '35' and '26.5' into '265'.
+    if len(glyphs) >= 2:
+        baseline = max(y + ch for _, y, _, ch in glyphs)
+        tallest = max(ch for *_, ch in glyphs)
+        left_edge = min(x + cw for x, _, cw, _ in glyphs)
+        right_edge = max(x for x, *_ in glyphs)
+        for x, y, cw, ch, i in specks:
+            if (left_edge <= x and x + cw <= right_edge and abs(y + ch - baseline) <= 0.15 * tallest
+                    and max(cw, ch) <= 0.35 * tallest):
+                keep |= labels == i
     ys, xs = np.where(keep)
     if ys.size == 0:
         return fill, keep, None
@@ -685,18 +831,23 @@ def is_timesheet_screenshot(rgb: np.ndarray) -> bool:
     return 28 <= len(grid.cols) <= 31
 
 
-def read_timesheet(image: np.ndarray) -> ParsedSheet:
-    rgb = _normalise_scale(np.ascontiguousarray(image[..., :3]).astype(np.uint8))
+def read_timesheet(image: np.ndarray, *, engine: str = "rapid") -> ParsedSheet:
+    """engine: 'rapid' (PP-OCRv4 via RapidOCR, used in production) or 'tesseract' (benchmark comparison)."""
+    rgb = _normalise_scale(_deskew(_flatten_lighting(np.ascontiguousarray(image[..., :3]).astype(np.uint8))))
     grid = _locate_grid(rgb)
-    engine = ENGINE_POOL.acquire()
+    if engine == "tesseract":
+        return _SheetReader(rgb, grid, _TesseractOcr()).read()
+    if engine != "rapid":
+        raise ValueError(f"unknown OCR engine {engine!r}")
+    pooled = ENGINE_POOL.acquire()
     try:
-        return _SheetReader(rgb, grid, _Ocr(engine)).read()
+        return _SheetReader(rgb, grid, _Ocr(pooled)).read()
     finally:
-        ENGINE_POOL.release(engine)
+        ENGINE_POOL.release(pooled)
 
 
 class _SheetReader:
-    def __init__(self, rgb: np.ndarray, grid: _Grid, ocr: _Ocr) -> None:
+    def __init__(self, rgb: np.ndarray, grid: _Grid, ocr: _Ocr | _TesseractOcr) -> None:
         self.rgb = rgb
         self.gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
         self.grid = grid
@@ -710,6 +861,7 @@ class _SheetReader:
         self.monochrome = float(np.percentile(saturation, 99.9)) < 25
 
     def read(self) -> ParsedSheet:
+        self.marks_over_grid = _marks_over_grid(self.rgb, self.grid)
         if self.monochrome:
             self.sheet.warnings.append("screenshot has no colour — approval statuses cannot be read")
         self._read_day_header()
@@ -1074,7 +1226,7 @@ class _SheetReader:
         sub = re.sub(r"\s*_\s*", "_", sub)
         sub = re.sub(r"(?<=[A-Za-z])[.,:;'`](?=\s)", "", sub)   # stray recogniser dots
         sub = re.sub(r"[\s\-:;.,_~]+$", "", sub)
-        if _fuzzy(_norm(sub), "outofoffice") >= 0.85:
+        if _fuzzy(_norm(sub), "outofoffice") >= LEAVE_SIMILARITY:
             sub = "Out Of Office"          # the sheet's leave project
         line.sub_project = sub
         line.sub_project_id = re.sub(r"\D", "", values.get("sub_project_id", ""))
@@ -1286,6 +1438,9 @@ class _SheetReader:
             return max(set(vals), key=vals.count) if vals else ""
 
         s = self.sheet
+        # distinct IDs actually read before rows are aligned to the majority: if they differ, the majority
+        # may be the misread one (a stamp turned '100410' into '1004'), so the ID cannot count as verified
+        self.person_id_reads = sorted({ln.person_id for ln in self.lines if ln.person_id})
         s.person_id = majority([ln.person_id for ln in self.lines])
         s.supplier = majority([ln.supplier for ln in self.lines])
         s.job_family = majority([ln.job_family for ln in self.lines])
@@ -1440,10 +1595,16 @@ class _SheetReader:
         for label, day_totals in s.totals.items():
             group = members(label)
             if not group and label != "TOTAL":
-                # a totals row for an hour type with no lines must be all zero
+                # a totals row for an hour type with no lines must be all zero, and readable: an
+                # unreadable value is not a zero (a misread label used to pass here with nothing compared)
                 nonzero = [i + 1 for i, v in enumerate(day_totals) if v]
-                checks.append({"check": f"{label} day totals", "expected": 0,
-                               "actual": len(nonzero), "ok": not nonzero, "mismatched_days": nonzero})
+                readable = sum(1 for v in day_totals if v is not None)
+                checks.append({"check": f"{label} day totals", "expected": 0, "actual": len(nonzero),
+                               "ok": not nonzero and readable >= 0.9 * len(day_totals),
+                               "mismatched_days": nonzero})
+                printed = s.totals_printed_total.get(label)
+                checks.append({"check": f"{label} grand total", "expected": 0, "actual": printed,
+                               "ok": printed == 0})
                 continue
             mismatched = []
             for di, expected in enumerate(day_totals):
@@ -1466,6 +1627,20 @@ class _SheetReader:
                 "check": f"{label} grand total", "expected": printed, "actual": got,
                 "ok": printed is not None and abs(got - printed) < 1e-6,
             })
+        if getattr(self, "marks_over_grid", False):
+            s.warnings.append("handwriting over the table — values may have been changed on paper")
+            checks.append({"check": "no handwriting over the table", "expected": "none",
+                           "actual": "marks found", "ok": False})
+        if s.totals and "TOTAL" not in s.totals:
+            checks.append({"check": "grand total row found", "expected": "a grand total row", "actual": None,
+                           "ok": False})
+        for uom in sorted({ln.uom for ln in lines if ln.uom} - set(s.totals)):
+            checks.append({"check": f"{uom} totals row found", "expected": f"a {uom} totals row",
+                           "actual": None, "ok": False})
+        if s.year and s.month:
+            days = calendar.monthrange(s.year, s.month)[1]
+            checks.append({"check": "day columns match the month", "expected": days, "actual": s.days_in_month,
+                           "ok": days == s.days_in_month})
         if not s.totals:
             s.warnings.append("totals rows not found — values could not be cross-checked")
             checks.append({"check": "totals rows present", "expected": "per-type and grand total rows",
@@ -1473,6 +1648,26 @@ class _SheetReader:
         if not (s.year and s.month):
             checks.append({"check": "month and year readable", "expected": "period",
                            "actual": None, "ok": False})
+        hour_types = set(s.totals) | {ln.uom for ln in lines if ln.uom}
+        for ln in lines:
+            task = (ln.sub_project or "").strip()
+            if not task or task.upper() in hour_types:
+                # an empty task cannot be told apart as leave or work; one that reads as an hour type means the
+                # text columns were misaligned (a stamp over the headers shifted them and a leave row was missed)
+                checks.append({"check": f"row {ln.row_index + 1} task read", "expected": "a task",
+                               "actual": task or None, "ok": False})
+                continue
+            similarity = _fuzzy(_norm(ln.sub_project), "outofoffice")
+            if AMBIGUOUS_LEAVE <= similarity < LEAVE_SIMILARITY and not ln.is_out_of_office:
+                checks.append({"check": f"row {ln.row_index + 1} task reads clearly as leave or work",
+                               "expected": "leave or work", "actual": ln.sub_project, "ok": False})
+        reads = getattr(self, "person_id_reads", [])
+        if len(reads) > 1:
+            checks.append({"check": "employee ID the same on every row", "expected": s.person_id,
+                           "actual": ", ".join(reads), "ok": False})
+        if not re.fullmatch(r"\d{3,}", s.person_id or ""):
+            checks.append({"check": "employee ID readable", "expected": "employee ID",
+                           "actual": s.person_id or None, "ok": False})
         unread = [(ln.row_index + 1, c.day) for ln in lines for c in ln.cells
                   if c.status != "EMPTY" and c.hours is None]
         if unread:

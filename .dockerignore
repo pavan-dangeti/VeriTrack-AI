@@ -12,3 +12,5 @@ test-data
 scripts
 docs
 *.md
+bench-data
+bench-out*
