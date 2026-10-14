@@ -65,8 +65,14 @@ class TestMasterAdminUniqueness:
                    VALUES ('MASTER_ADMIN', 'second-ma@x.com', 'PASSWORD', :h)""",
                 {"h": FAKE_HASH},
             )
-        assert err is not None, "2nd MA must violate uq_users_single_master_admin"
-        assert "uq_users_single_master_admin" in str(err)
+        assert err is not None, "2nd MA in one organisation must violate uq_users_master_admin_per_org"
+        assert "uq_users_master_admin_per_org" in str(err)
+
+    async def test_each_organisation_has_its_own_master_admin(self, ma_user_id):
+        from app.cli import create_organization
+
+        rc, password = await create_organization("Second Co", "admin@second.example")
+        assert rc == 0 and password
 
 
 class TestHierarchyTriggers:

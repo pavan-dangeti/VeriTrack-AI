@@ -2,6 +2,7 @@
 
 from sqlalchemy import func, select
 
+from app.db.tenant import SYSTEM, tenant
 from app.models.audit_log import AuditLog, AuditResult
 from app.services import audit_service
 from tests.conftest import (
@@ -39,7 +40,13 @@ class TestLoginAuditing:
             "/api/v1/auth/login",
             json={"email": "ghost@nowhere.com", "password": "Whatever!123"},
         )
-        assert await _count(AuditResult.FAILURE, audit_service.ACTION_LOGIN) == 1
+        # it belongs to no organisation, so no organisation's admin sees it
+        assert await _count(AuditResult.FAILURE, audit_service.ACTION_LOGIN) == 0
+        with tenant(SYSTEM):
+            async with open_session() as db:
+                entry = (await db.execute(select(AuditLog).where(AuditLog.action == audit_service.ACTION_LOGIN))
+                         ).scalar_one()
+        assert entry.result == AuditResult.FAILURE and entry.actor_user_id is None and entry.org_id is None
 
     async def test_logout_audited(self, client, ma_user_id):
         login = await client.post(

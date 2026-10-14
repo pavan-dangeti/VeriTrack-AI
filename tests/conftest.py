@@ -1,4 +1,5 @@
 import asyncio
+import contextvars
 import os
 import tempfile
 
@@ -23,7 +24,8 @@ from app.core.config import settings
 from app.core.rate_limit import limiter
 from app.db.session import engine
 
-TABLES = ("users", "audit_logs", "approved_m365_domains", "refresh_tokens")
+# organizations cascades to every tenant table
+TABLES = ("organizations", "users", "audit_logs", "approved_m365_domains", "refresh_tokens")
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -69,7 +71,11 @@ async def _assert_schema_matches_models():
 
 @pytest.fixture(autouse=True)
 async def clean_state():
-    """Full isolation between tests: truncate everything, reset rate limiter."""
+    """Full isolation between tests: truncate everything, reset rate limiter. The test itself runs as a trusted
+    internal step that sees every organisation; requests made through `client` never inherit that."""
+    from app.db.tenant import SYSTEM, set_tenant
+
+    set_tenant(SYSTEM)
     await engine.dispose()  # drop pooled connections bound to a previous loop
     limiter.reset()
     async with engine.begin() as conn:
@@ -85,9 +91,18 @@ async def clean_state():
 
 @pytest_asyncio.fixture
 async def client():
-    transport = ASGITransport(app=app_for_tests())
+    transport = ASGITransport(app=_in_fresh_context(app_for_tests()))
     async with AsyncClient(transport=transport, base_url="http://testserver") as c:
         yield c
+
+
+def _in_fresh_context(app):
+    """Runs each request in an empty context, as a real server does: the test's tenant never reaches the app,
+    and the tenant a request sets never leaks back into the test or the next request."""
+    async def isolated(scope, receive, send):
+        await asyncio.get_running_loop().create_task(app(scope, receive, send), context=contextvars.Context())
+
+    return isolated
 
 
 def app_for_tests():
@@ -106,7 +121,11 @@ async def seed_master_admin(email: str, password: str):
     async with open_session() as db:
         user = await get_user_by_email(db, email)
         assert user is not None
-        return user.id
+    # direct inserts and checks in the test now act inside the admin's organisation
+    from app.db.tenant import set_tenant
+
+    set_tenant(user.org_id)
+    return user.id
 
 
 def open_session():
