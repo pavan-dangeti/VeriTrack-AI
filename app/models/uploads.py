@@ -19,6 +19,7 @@ from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
+from app.models.organization import TenantScoped
 
 
 class BatchKind(enum.StrEnum):
@@ -42,7 +43,7 @@ class FileStatus(enum.StrEnum):
     PENDING_OCR = "PENDING_OCR"
 
 
-class UploadBatch(Base):
+class UploadBatch(TenantScoped, Base):
     __tablename__ = "upload_batches"
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -66,7 +67,7 @@ class UploadBatch(Base):
     files: Mapped[list["UploadedFile"]] = relationship(back_populates="batch")
 
 
-class UploadedFile(Base):
+class UploadedFile(TenantScoped, Base):
     __tablename__ = "uploaded_files"
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -100,7 +101,7 @@ class UploadedFile(Base):
     )
 
 
-class ExtractedRow(Base):
+class ExtractedRow(TenantScoped, Base):
     """Normalized internal record format — identical shape regardless of
     source (PDF / Excel / CSV / OCR). Raw per-source quirks stay in `data`."""
 

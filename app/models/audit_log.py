@@ -17,6 +17,7 @@ from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
+from app.models.organization import TENANT_DEFAULT
 
 
 class AuditResult(enum.StrEnum):
@@ -36,6 +37,11 @@ class AuditLog(Base):
         ForeignKey("users.id", ondelete="SET NULL"),
         nullable=True,
         index=True,
+    )
+    # nullable: a failed sign-in for an unknown e-mail belongs to no organisation
+    org_id: Mapped[uuid.UUID | None] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("organizations.id"), nullable=True, index=True,
+        server_default=TENANT_DEFAULT,
     )
     action: Mapped[str] = mapped_column(String(100), nullable=False)
     target_entity: Mapped[str | None] = mapped_column(String(100), nullable=True)

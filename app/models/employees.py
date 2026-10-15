@@ -16,9 +16,10 @@ from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
+from app.models.organization import TenantScoped
 
 
-class Employee(Base):
+class Employee(TenantScoped, Base):
     """Per-manager employee master record. Never destructively edited:
     every change inserts a new row in employee_versions."""
 
@@ -65,7 +66,7 @@ class Employee(Base):
     )
 
 
-class EmployeeVersion(Base):
+class EmployeeVersion(TenantScoped, Base):
     __tablename__ = "employee_versions"
     __table_args__ = (
         UniqueConstraint("employee_id", "version_no", name="uq_employee_versions_no"),

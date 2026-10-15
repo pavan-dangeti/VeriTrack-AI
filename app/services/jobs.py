@@ -11,10 +11,25 @@ from sqlalchemy import select, update
 
 from app.core.config import settings
 from app.core.logging import get_logger
+from app.db.tenant import SYSTEM, tenant
 
 log = get_logger("jobs")
 
 _running: set[asyncio.Task] = set()
+
+
+async def batch_org(factory, batch_id: str):
+    """A job runs in the organisation of its batch. The request that queued it may be gone (a Celery worker,
+    or recovery after a restart), so the organisation is looked up rather than inherited."""
+    import uuid
+
+    from app.models.uploads import UploadBatch
+
+    with tenant(SYSTEM):
+        async with factory() as db:
+            return (await db.execute(
+                select(UploadBatch.org_id).where(UploadBatch.id == uuid.UUID(batch_id))
+            )).scalar_one_or_none()
 
 
 def _spawn(coro, name: str) -> None:
@@ -27,13 +42,14 @@ async def _process_batch_job(batch_id: str) -> dict:
     from app.db.session import get_session_factory
     from app.services.batch_service import run_batch_processing
 
-    try:
-        async with get_session_factory()() as db:
-            return await run_batch_processing(db, batch_id)
-    except Exception as exc:  # noqa: BLE001 — a job must never kill the loop
-        log.error("batch_job_failed", batch_id=batch_id, exc_info=exc)
-        await _mark_batch_failed(batch_id, exc)
-        return {"status": "error"}
+    with tenant(await batch_org(get_session_factory(), batch_id)):
+        try:
+            async with get_session_factory()() as db:
+                return await run_batch_processing(db, batch_id)
+        except Exception as exc:  # noqa: BLE001 — a job must never kill the loop
+            log.error("batch_job_failed", batch_id=batch_id, exc_info=exc)
+            await _mark_batch_failed(batch_id, exc)
+            return {"status": "error"}
 
 
 async def _mark_batch_failed(batch_id: str, exc: Exception) -> None:
@@ -67,8 +83,9 @@ async def _analysis_job(batch_id: str, triggered_by, run_id: str | None = None) 
     from app.db.session import get_session_factory
     from app.services.analyze_service import execute_analysis
 
-    async with get_session_factory()() as db:
-        return await execute_analysis(db, batch_id, triggered_by=triggered_by, run_id=run_id)
+    with tenant(await batch_org(get_session_factory(), batch_id)):
+        async with get_session_factory()() as db:
+            return await execute_analysis(db, batch_id, triggered_by=triggered_by, run_id=run_id)
 
 
 async def dispatch_analysis(batch_id: str, triggered_by, run_id: str | None = None) -> dict | None:
@@ -97,10 +114,21 @@ async def recover_interrupted_batches(stale_after: timedelta = timedelta(minutes
     if settings.processing_mode != "background":
         return 0
     from app.db.session import get_session_factory
-    from app.models.uploads import BatchStatus, FileStatus, UploadBatch, UploadedFile
 
     cutoff = datetime.now(UTC) - stale_after
-    async with get_session_factory()() as db:
+    with tenant(SYSTEM):  # every organisation's batches
+        stuck = await _requeue_stuck_batches(get_session_factory(), cutoff)
+    for bid in stuck:
+        _spawn(_process_batch_job(str(bid)), f"batch:{bid}")
+    if stuck:
+        log.info("recovered_batches", count=len(stuck))
+    return len(stuck)
+
+
+async def _requeue_stuck_batches(factory, cutoff) -> list:
+    from app.models.uploads import BatchStatus, FileStatus, UploadBatch, UploadedFile
+
+    async with factory() as db:
         stuck = (
             await db.execute(
                 select(UploadBatch.id).where(
@@ -111,7 +139,7 @@ async def recover_interrupted_batches(stale_after: timedelta = timedelta(minutes
             )
         ).scalars().all()
         if not stuck:
-            return 0
+            return []
         await db.execute(
             update(UploadedFile)
             .where(UploadedFile.batch_id.in_(stuck), UploadedFile.status == FileStatus.PROCESSING)
@@ -121,10 +149,7 @@ async def recover_interrupted_batches(stale_after: timedelta = timedelta(minutes
             update(UploadBatch).where(UploadBatch.id.in_(stuck)).values(status=BatchStatus.QUEUED)
         )
         await db.commit()
-    for bid in stuck:
-        _spawn(_process_batch_job(str(bid)), f"batch:{bid}")
-    log.info("recovered_batches", count=len(stuck))
-    return len(stuck)
+    return list(stuck)
 
 
 async def recover_interrupted_analyses(stale_after: timedelta = timedelta(minutes=10)) -> int:
@@ -136,14 +161,13 @@ async def recover_interrupted_analyses(stale_after: timedelta = timedelta(minute
     from app.models.analysis import AnalysisRun, AnalysisStatus
 
     cutoff = datetime.now(UTC) - stale_after
-    async with get_session_factory()() as db:
-        stuck = (
-            await db.execute(
+    with tenant(SYSTEM):  # every organisation's runs
+        async with get_session_factory()() as db:
+            stuck = (await db.execute(
                 select(AnalysisRun.id, AnalysisRun.batch_id, AnalysisRun.triggered_by).where(
                     AnalysisRun.status == AnalysisStatus.RUNNING, AnalysisRun.started_at < cutoff
                 )
-            )
-        ).all()
+            )).all()
     for run_id, batch_id, by in stuck:
         _spawn(_analysis_job(str(batch_id), by, str(run_id)), f"analysis:{batch_id}")
     if stuck:

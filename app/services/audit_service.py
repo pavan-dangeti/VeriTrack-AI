@@ -3,9 +3,11 @@
 import uuid
 from typing import Any
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
+from app.db.tenant import SYSTEM, current
 from app.models.audit_log import AuditLog, AuditResult
 
 log = get_logger("audit")
@@ -47,6 +49,11 @@ async def record(
         result=result,
         event_metadata=metadata,
     )
+    if current() == SYSTEM and actor_user_id is not None:
+        # sign-in and CLI steps run before an organisation is set: the entry belongs to the actor's
+        from app.models.user import User
+
+        entry.org_id = select(User.org_id).where(User.id == actor_user_id).scalar_subquery()
     db.add(entry)
     await db.commit()
     log.info(

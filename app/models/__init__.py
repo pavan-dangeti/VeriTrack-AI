@@ -8,6 +8,7 @@ from app.models.analysis import (
 )
 from app.models.employees import Employee, EmployeeVersion
 from app.models.leaves import CompanyLeave
+from app.models.organization import Organization
 from app.models.uploads import (
     BatchKind,
     BatchStatus,
@@ -18,6 +19,7 @@ from app.models.uploads import (
 )
 
 __all__ = [
+    "Organization",
     "AnalysisRun",
     "AnalysisStatus",
     "EmailStatus",

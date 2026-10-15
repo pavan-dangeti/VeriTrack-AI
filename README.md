@@ -151,6 +151,10 @@ flowchart TB
 - **Exactly-once processing.** Files, batches and analyses are claimed with atomic status transitions
   (`UPDATE … WHERE status … RETURNING`) and a unique run per batch: double clicks, retries and multiple
   replicas can never process twice. Interrupted batches and analyses resume on startup.
+- **Tenant isolation in the database.** Every row belongs to an organisation, and PostgreSQL row-level security
+  shows each transaction only its own organisation's rows: a query that forgets to filter returns nothing extra.
+  Each transaction runs as `veritrack_app`, a role that can never bypass the policies, whatever role the app
+  logs in as. Background jobs look up their batch's organisation rather than inheriting one.
 - **Stateless API.** Short-lived access tokens, rotating refresh tokens with reuse detection (and a 30 s grace
   window so parallel browser tabs don't log each other out). Scale out by adding instances.
 
@@ -161,11 +165,12 @@ OCR suites use synthetic sheets with invented people and projects, rendered on d
 
 | Suite | What it proves | Result |
 |---|---|---|
-| **Backend** (`pytest tests`) | API, auth, rules, OCR, concurrency, recovery, exports, migrations | **336 passed** |
+| **Backend** (`pytest tests`) | API, auth, rules, OCR, concurrency, recovery, exports, migrations | **347 passed** |
 | &nbsp;&nbsp;OCR regression | 16 synthetic sheets (28–31-day months, 1–9 projects, 4 fonts, 90–150 % zoom) read field-for-field | **16/16 exact** |
 | &nbsp;&nbsp;Capture conditions | 4 sheets × 7 degradations (80–200 % zoom, JPEG q60, blur, noise): every hour, total, status, ID and period | **28/28 exact** |
 | &nbsp;&nbsp;Hostile inputs | cropped totals, cut-off columns, rotation, grayscale, tiny, padded: exact *or* flagged — never verified-and-wrong | **7/7** |
 | &nbsp;&nbsp;Permission matrix | all 42 endpoints × 4 roles + anonymous; cross-manager access to every object type | **0 leaks** |
+| &nbsp;&nbsp;Organisation isolation (`pytest tests/test_tenant_isolation.py`) | another organisation's 4 roles against every route that takes an id, list, export and write; row-level security per table with raw SQL; passes logged in as a superuser too | **0 leaks** |
 | **Frontend** (`npm test`) | pages, guards, flows, shell | **56 passed** |
 | **End-to-end** (`pytest e2e`, real Chromium) | every page and button for all four roles, uploads, downloads, dark mode, palette, mobile, negative paths; fails on any console error or 5xx | **48 passed**, stable across consecutive runs, also against the production build |
 | **Load** (`scripts/load_test.py`, production mode, 2 vCPU) | 50 concurrent users: 40 managers upload → OCR → analyse while 10 HR users browse continuously | **40/40 results correct, 0 errors, 0 cross-user leaks** |
@@ -210,7 +215,8 @@ python -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
 cp .env.example .env                        # set ADMIN_PASSWORD
 createdb veritrack                          # or: docker compose up -d db
 .venv/bin/alembic upgrade head
-.venv/bin/python -m app.cli create-master-admin
+.venv/bin/python -m app.cli create-master-admin   # admin of the first organisation
+.venv/bin/python -m app.cli create-organization "Acme Ltd" --admin-email admin@acme.example   # another tenant
 .venv/bin/uvicorn app.main:app --reload     # http://localhost:8000/docs
 
 # frontend
@@ -218,6 +224,9 @@ cd frontend && npm ci && npm run dev        # http://localhost:5173
 ```
 
 Or run the whole stack in containers: `docker compose up --build` → <http://localhost:8080>.
+
+The database role that runs migrations needs `CREATEROLE` (migration 0008 creates `veritrack_app`). The
+Compose database's role is a superuser; on a managed database the owner role usually has it.
 
 ## Configuration
 
@@ -267,13 +276,18 @@ lint, tests and build on every push and pull request.
 
 | Role | Can |
 |---|---|
-| **Master Admin** | manage users, system settings and SSO domains, audit logs; see every manager's data |
+| **Master Admin** | manage users, system settings and SSO domains, audit logs; see every manager's data in their organisation |
 | **Executive** | analytics, every repository and report, manager & HR directory |
 | **Manager** | upload timesheets, repositories and leave registers; run analyses; reports; create HR accounts |
 | **HR** | read-only access to their manager's employees, timesheet exports and leave register |
 
 The route guard and the API enforce the same table; `tests/test_permission_matrix.py` fails if an endpoint
 is added without a permission decision.
+
+**Organisations.** Each organisation has its own Master Admin, users and data, and no role sees another
+organisation's. The first one is created on first start and administered by `ADMIN_EMAIL`; the platform
+operator adds more with `python -m app.cli create-organization`. `tests/test_tenant_isolation.py` fails if an
+endpoint is added without a cross-organisation check.
 
 ## Security
 
@@ -285,6 +299,8 @@ is added without a permission decision.
 - Uploads validated by magic bytes and size; CSV/Excel exports neutralise formula injection.
 - Security headers (HSTS, `nosniff`, `DENY` framing, referrer policy); `/docs` disabled in production.
 - Audit log for logins, user changes, uploads, analyses, exports and settings.
+- Organisations isolated by PostgreSQL row-level security (forced, so it also binds the table owner) under a
+  role that cannot bypass it; a row cannot be read, written or created outside the current organisation.
 
 ## Project layout
 
@@ -319,6 +335,12 @@ docs/                 deployment guide, screenshots, demo video
 - Pen marks that are not data (ticks, circles) also send a sheet to review.
 - Processing a batch is sequential per batch (fair across managers); a single very large batch takes
   ~6–10 s per sheet per OCR slot.
+- **Organisations are created by the operator** (CLI), not by self-service sign-up, and a user belongs to one
+  organisation. E-mail addresses are unique across organisations, since they are the sign-in identity, so
+  creating a user with an address another organisation uses is refused, which reveals that it exists. Likewise
+  an SSO domain can be approved by only one organisation.
+- A failed sign-in for an e-mail with no account belongs to no organisation, so no organisation's audit log
+  shows it; it is kept in the database.
 - Microsoft 365 sign-in and live e-mail need an Entra ID app registration and were exercised in dry-run mode.
 
 ## License

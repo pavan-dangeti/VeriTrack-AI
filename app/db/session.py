@@ -3,6 +3,7 @@ from collections.abc import AsyncGenerator
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.core.config import settings
+from app.db import tenant as _tenant  # noqa: F401  (registers the row-level security hook)
 
 
 def _engine_kwargs() -> dict:

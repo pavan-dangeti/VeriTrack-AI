@@ -7,6 +7,7 @@ import asyncio
 import uuid
 
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import generate_initial_password, hash_password
@@ -69,7 +70,12 @@ async def create_user(
         ),
     )
     db.add(user)
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError as exc:
+        # e-mail is unique across organisations; one in another organisation is invisible to the check above
+        await db.rollback()
+        raise UserRuleError(409, "email_taken", "A user with this email already exists") from exc
     await db.refresh(user)
 
     await audit_service.record(

@@ -10,7 +10,7 @@ from datetime import UTC, datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import RedirectResponse
 
-from app.api.deps import DB, Ctx, CurrentUser, verify_csrf
+from app.api.deps import DB, Ctx, CurrentUser, system_tenant, verify_csrf
 from app.core.config import settings
 from app.core.rate_limit import CSRF_LIMIT, LOGIN_LIMIT, REFRESH_LIMIT, limiter
 from app.core.security import constant_time_equals, new_state_token
@@ -24,7 +24,7 @@ from app.services.auth_service import (
     rotate_refresh,
 )
 
-router = APIRouter(prefix="/auth", tags=["auth"])
+router = APIRouter(prefix="/auth", tags=["auth"], dependencies=[Depends(system_tenant)])
 
 REFRESH_COOKIE = "veritrack_refresh"
 CSRF_COOKIE = "veritrack_csrf"
@@ -198,7 +198,8 @@ async def m365_callback(request: Request, db: DB, ctx: Ctx, response: Response):
             401, detail={"code": "no_email", "message": "No email claim in SSO token"}
         )
 
-    if not await m365_service.domain_is_approved(db, email):
+    domain_org = await m365_service.approved_domain_org(db, email)
+    if domain_org is None:
         await audit_service.record(
             db,
             action=audit_service.ACTION_LOGIN_M365,
@@ -217,7 +218,8 @@ async def m365_callback(request: Request, db: DB, ctx: Ctx, response: Response):
         )
 
     user = await get_user_by_email(db, email)
-    if user is None or not user.is_active:
+    # the account must be in the organisation that approved the domain
+    if user is None or not user.is_active or user.org_id != domain_org:
         await audit_service.record(
             db,
             action=audit_service.ACTION_LOGIN_M365,

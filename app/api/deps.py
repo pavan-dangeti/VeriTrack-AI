@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.permissions import Permission, role_has
 from app.core.security import constant_time_equals, decode_token
 from app.db.session import get_db
+from app.db.tenant import SYSTEM, set_tenant, tenant
 from app.models.user import User
 from app.services import audit_service
 from app.services.auth_service import AuthError, get_user_by_email
@@ -55,13 +56,25 @@ async def get_current_user(
     except pyjwt.PyJWTError as exc:
         raise unauthorized from exc
 
-    try:
-        user = await db.get(User, uuid.UUID(payload["sub"]))
-    except (ValueError, sqlalchemy.exc.DataError) as exc:
-        raise unauthorized from exc
+    # the user is resolved before their organisation is known; that transaction is then closed so the rest
+    # of the request runs restricted to the user's organisation (row-level security, app/db/tenant.py)
+    with tenant(SYSTEM):
+        try:
+            user = await db.get(User, uuid.UUID(payload["sub"]))
+        except (ValueError, sqlalchemy.exc.DataError) as exc:
+            raise unauthorized from exc
+        finally:
+            await db.commit()
     if user is None or not user.is_active:
         raise unauthorized
+    set_tenant(user.org_id)
     return user
+
+
+async def system_tenant() -> None:
+    """For sign-in, refresh and sign-out: the account is looked up by e-mail or token before any
+    organisation is known."""
+    set_tenant(SYSTEM)
 
 
 CurrentUser = Annotated[User, Depends(get_current_user)]
