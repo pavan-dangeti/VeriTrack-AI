@@ -38,8 +38,11 @@ audit history cannot be deleted (the foreign key used to null out their entries)
 
 **Verifying.** `python -m app.cli verify-audit-log` checks every chain and exits 1 if any is broken; a Master
 Admin can check their organisation's chain at `GET /api/v1/audit-logs/verify`, and that check is itself
-audited. The verifier recomputes every hash in Python (`app/services/audit_chain.py`), independently of the
-trigger, and reports the first entry where the chain fails, and why.
+audited. The verifier recomputes every hash in Python (`app/services/audit_chain.py`) from each entry's raw
+fields, and reports the first entry where the chain fails, and why. It rebuilds the canonical text itself
+instead of calling the database's `audit_log_canonical()`, which someone able to change the schema could
+redefine to render an edited entry's original text (`test_a_redefined_canonical_function_cannot_hide_an_edit`);
+it relies only on built-in casts, which a database owner cannot redefine.
 
 | Change made directly in the database | Caught? | Test |
 |---|---|---|
@@ -89,3 +92,5 @@ rows can do it. The chain makes past entries tamper-evident, not new ones trustw
 - E-mail addresses and SSO domains are unique across organisations, so trying one reveals that it exists
   somewhere.
 - Uploaded files are stored unencrypted by the app; encryption at rest is left to the disk or bucket.
+- Verification is only as trustworthy as the machine and code running it: run the CLI from a checkout you
+  trust, not from a host the attacker controls.

@@ -249,3 +249,54 @@ def test_the_migration_chains_existing_entries_exactly_as_the_trigger_does():
     finally:
         command.upgrade(cfg, "head")   # never leave the shared test database behind
     assert asyncio.run(run(read=True)) == before
+
+
+async def test_python_renders_entries_exactly_as_the_database_does(ma_user_id):
+    """The verifier rebuilds each entry's text itself; it must match the trigger's, byte for byte, on awkward
+    input, or legitimate entries would fail verification."""
+    awkward = [
+        ("QUOTE\"BACKSLASH\\", "Mozilla/5.0 \"quoted\"\nnew line\ttab\x01ctrl", "2001:db8::1",
+         {"z": 1, "a": [1.5, "é", None, True], "nested": {"k\"ey": "line\nbreak", "emoji": "🔒"}}),
+        ("UNICODE_ÄÖÜ_日本", None, "203.0.113.7", {}),
+        ("NULLS", None, None, None),
+        ("NUMBERS", "", "10.0.0.1", {"big": 12345678901234567890, "neg": -0.25, "zero": 0, "list": []}),
+    ]
+    async with open_session() as db:
+        for action, agent, ip, meta in awkward:
+            await audit_service.record(db, action=action, result=AuditResult.DENIED, actor_user_id=ma_user_id,
+                                       target_entity="t x", target_id="id/ ", ip_address=ip,
+                                       user_agent=agent, metadata=meta)
+        rows = (await db.execute(text("""
+            SELECT org_id, chain_seq, prev_hash, timestamp, actor_user_id, action, target_entity, target_id,
+                   ip_address::text, user_agent, result::text, metadata::text,
+                   audit_log_canonical(org_id, chain_seq, prev_hash, timestamp, actor_user_id, action,
+                                       target_entity, target_id, ip_address, user_agent, result::text, metadata)
+              FROM audit_logs ORDER BY chain_seq"""))).all()
+    assert len(rows) == len(awkward) + 1
+    for row in rows:
+        assert audit_chain.canonical(*row[:12]) == row[12]
+
+
+async def test_a_redefined_canonical_function_cannot_hide_an_edit(org):
+    """An attacker who can change the schema edits entry 4, then redefines audit_log_canonical() to render
+    the entry's original text. The verifier does not use that function, so the edit still shows."""
+    with tenant(SYSTEM):
+        async with open_session() as db:
+            original_text, entry_id = (await db.execute(text("""
+                SELECT audit_log_canonical(org_id, chain_seq, prev_hash, timestamp, actor_user_id, action,
+                                           target_entity, target_id, ip_address, user_agent, result::text, metadata),
+                       id
+                  FROM audit_logs WHERE org_id = :org AND chain_seq = 4"""), {"org": org})).one()
+            definition = (await db.execute(text(
+                "SELECT pg_get_functiondef('audit_log_canonical'::regproc)"))).scalar_one()
+    lying = definition.replace("SELECT json_build_array(", (
+        f"SELECT CASE WHEN seq = 4 AND org = '{org}' THEN $q${original_text}$q$ ELSE json_build_array(")
+    ).replace(")::text", ")::text END", 1)
+    assert lying != definition
+    try:
+        await _tamper(lying)
+        await _tamper("UPDATE audit_logs SET action = 'NOTHING_HAPPENED' WHERE id = :id", id=entry_id)
+        report = await _report(org)
+        assert report.first_break["seq"] == 4 and "content does not match" in report.first_break["reason"]
+    finally:
+        await _tamper(definition)
