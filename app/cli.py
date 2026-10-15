@@ -4,6 +4,7 @@
     python -m app.cli create-master-admin [--email X --password Y] [--if-not-exists]
     python -m app.cli approve-domain <domain> [--creator-email X]
     python -m app.cli create-organization <name> --admin-email X   # a new tenant and its Master Admin
+    python -m app.cli verify-audit-log [--expect-head ORG:SEQ:HASH ...]  # exit 1 if any audit chain is broken
 
 ADMIN_EMAIL administers the bootstrap organisation (the oldest one, created on first start). Every command
 runs as a trusted internal step that can see all organisations (app/db/tenant.py) and names the organisation
@@ -194,6 +195,31 @@ async def create_organization(name: str, admin_email: str) -> tuple[int, str | N
     return 0, password
 
 
+def _parse_head(value: str) -> tuple[uuid.UUID | None, tuple[int, str]]:
+    org, seq, digest = value.rsplit(":", 2)
+    return (None if org == "none" else uuid.UUID(org)), (int(seq), digest)
+
+
+async def verify_audit_log(heads: list[str]) -> int:
+    """Checks every organisation's audit chain; prints each head so it can be recorded and passed back later
+    with --expect-head, which also catches removed newest entries and full rewrites."""
+    from app.services import audit_chain
+
+    expect = dict(_parse_head(h) for h in heads)
+    with tenant(SYSTEM):
+        async with get_session_factory()() as db:
+            reports = await audit_chain.verify(db, expect)
+    for r in reports:
+        org = r.org_id or "none"
+        if r.ok:
+            print(f"OK      {org}  {r.entries} entries  head {org}:{r.head_seq}:{r.head_hash}")
+        else:
+            b = r.first_break or {}
+            print(f"BROKEN  {org}  {r.entries} entries  first break at entry {b.get('seq')} "
+                  f"(id {b.get('id')}): {b.get('reason')}")
+    return 0 if all(r.ok for r in reports) else 1
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(prog="veritrack")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -209,6 +235,9 @@ def main() -> int:
     p_domain = sub.add_parser("approve-domain")
     p_domain.add_argument("domain")
     p_domain.add_argument("--creator-email", default=settings.admin_email)
+
+    p_verify = sub.add_parser("verify-audit-log")
+    p_verify.add_argument("--expect-head", action="append", default=[], metavar="ORG:SEQ:HASH")
 
     p_org = sub.add_parser("create-organization")
     p_org.add_argument("name")
@@ -252,6 +281,8 @@ def main() -> int:
         return rc
     if args.command == "approve-domain":
         return asyncio.run(approve_domain(args.domain, args.creator_email))
+    if args.command == "verify-audit-log":
+        return asyncio.run(verify_audit_log(args.expect_head))
     if args.command == "create-organization":
         rc, org_password = asyncio.run(create_organization(args.name, args.admin_email))
         if org_password:
