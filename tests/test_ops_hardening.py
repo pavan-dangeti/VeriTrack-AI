@@ -122,6 +122,60 @@ class TestRetentionAndSoftDelete:
             remaining = set(await db.scalars(select(UploadBatch.id)))
             assert remaining == {new_id}
 
+    async def test_purge_deletes_stored_files_and_reports_with_the_rows(self, client, ma_user_id):
+        """Old uploads and reports must leave storage too: rows deleted while the blobs stay behind would
+        keep personal data past the retention window with nothing pointing at it."""
+        from sqlalchemy import select
+        from sqlalchemy import update as sa_update
+
+        from app.models.analysis import AnalysisRun, GeneratedReport
+        from app.models.uploads import UploadBatch, UploadedFile
+        from app.services.storage import StorageError, get_storage
+
+        ma = await _login(client, MA_EMAIL, MA_PASSWORD)
+        mgr = await _make_manager(client, ma, "blobs")
+        await client.post("/api/v1/uploads?kind=EMPLOYEE_REPO",
+                          files=[("files", ("repo.csv", io.BytesIO(REPO_CSV), "text/csv"))], headers=mgr)
+        sheet = b"Employee ID,Name,Customer Leave,Company Leave\nE-100,Ann Weaver,x,\n"
+        old = (await client.post("/api/v1/uploads?kind=TIMESHEET",
+                                 files=[("files", ("old.csv", io.BytesIO(sheet), "text/csv"))], headers=mgr)).json()
+        assert (await client.post(f"/api/v1/batches/{old['id']}/analyze", headers=mgr)).status_code in (200, 202)
+        new = (await client.post("/api/v1/uploads?kind=TIMESHEET",
+                                 files=[("files", ("new.csv", io.BytesIO(sheet), "text/csv"))], headers=mgr)).json()
+
+        async def keys(batch_id):
+            async with open_session() as db:
+                files = list(await db.scalars(select(UploadedFile.storage_key)
+                                              .where(UploadedFile.batch_id == uuid.UUID(batch_id))))
+                reports = list(await db.scalars(
+                    select(GeneratedReport.storage_key).join(AnalysisRun, AnalysisRun.id == GeneratedReport.run_id)
+                    .where(AnalysisRun.batch_id == uuid.UUID(batch_id))))
+            return files, reports
+
+        old_files, old_reports = await keys(old["id"])
+        new_files, _ = await keys(new["id"])
+        storage = get_storage()
+        assert old_files and old_reports and new_files
+        assert all(storage.get_bytes(k) for k in old_files + old_reports + new_files)
+
+        async with open_session() as db:
+            await db.execute(sa_update(UploadBatch).where(UploadBatch.id == uuid.UUID(old["id"]))
+                             .values(created_at=datetime.now(UTC) - timedelta(days=1000)))
+            await db.commit()
+        r = await client.post("/api/v1/settings/purge-obsolete-data", headers=ma)
+        assert r.status_code == 200 and r.json()["purged_batches"] == 1, r.text
+
+        assert await keys(old["id"]) == ([], [])
+        still_stored = []
+        for key in old_files + old_reports:
+            try:
+                storage.get_bytes(key)
+                still_stored.append(key)
+            except StorageError:
+                pass
+        assert not still_stored, f"purged rows left {len(still_stored)} stored objects behind"
+        assert all(storage.get_bytes(k) for k in new_files)
+
     async def test_employees_survive_purge_and_have_no_hard_delete(self, client, ma_user_id):
         ma = await _login(client, MA_EMAIL, MA_PASSWORD)
         mgr = await _make_manager(client, ma, "keep")
