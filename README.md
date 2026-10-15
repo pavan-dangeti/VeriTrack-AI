@@ -155,6 +155,9 @@ flowchart TB
   shows each transaction only its own organisation's rows: a query that forgets to filter returns nothing extra.
   Each transaction runs as `veritrack_app`, a role that can never bypass the policies, whatever role the app
   logs in as. Background jobs look up their batch's organisation rather than inheriting one.
+- **Tamper-evident audit log.** Each organisation's audit entries form a SHA-256 hash chain written by a database
+  trigger, so no code path can skip it; the app may only append. `verify-audit-log` recomputes every chain
+  and names the first entry that no longer fits. See the [threat model](docs/threat-model.md).
 - **Stateless API.** Short-lived access tokens, rotating refresh tokens with reuse detection (and a 30 s grace
   window so parallel browser tabs don't log each other out). Scale out by adding instances.
 
@@ -165,11 +168,12 @@ OCR suites use synthetic sheets with invented people and projects, rendered on d
 
 | Suite | What it proves | Result |
 |---|---|---|
-| **Backend** (`pytest tests`) | API, auth, rules, OCR, concurrency, recovery, exports, migrations | **347 passed** |
+| **Backend** (`pytest tests`) | API, auth, rules, OCR, concurrency, recovery, exports, migrations | **366 passed** |
 | &nbsp;&nbsp;OCR regression | 16 synthetic sheets (28–31-day months, 1–9 projects, 4 fonts, 90–150 % zoom) read field-for-field | **16/16 exact** |
 | &nbsp;&nbsp;Capture conditions | 4 sheets × 7 degradations (80–200 % zoom, JPEG q60, blur, noise): every hour, total, status, ID and period | **28/28 exact** |
 | &nbsp;&nbsp;Hostile inputs | cropped totals, cut-off columns, rotation, grayscale, tiny, padded: exact *or* flagged — never verified-and-wrong | **7/7** |
 | &nbsp;&nbsp;Permission matrix | all 42 endpoints × 4 roles + anonymous; cross-manager access to every object type | **0 leaks** |
+| &nbsp;&nbsp;Audit log tampering (`pytest tests/test_audit_chain.py`) | edited, re-hashed, deleted, reordered and forged entries made directly in the database; truncated and fully rewritten chains against a recorded head; 40 concurrent writers; the migration's backfill | **every change caught** at the entry where it was made, except what the [threat model](docs/threat-model.md) lists |
 | &nbsp;&nbsp;Organisation isolation (`pytest tests/test_tenant_isolation.py`) | another organisation's 4 roles against every route that takes an id, list, export and write; row-level security per table with raw SQL; passes logged in as a superuser too | **0 leaks** |
 | **Frontend** (`npm test`) | pages, guards, flows, shell | **56 passed** |
 | **End-to-end** (`pytest e2e`, real Chromium) | every page and button for all four roles, uploads, downloads, dark mode, palette, mobile, negative paths; fails on any console error or 5xx | **48 passed**, stable across consecutive runs, also against the production build |
@@ -217,6 +221,7 @@ createdb veritrack                          # or: docker compose up -d db
 .venv/bin/alembic upgrade head
 .venv/bin/python -m app.cli create-master-admin   # admin of the first organisation
 .venv/bin/python -m app.cli create-organization "Acme Ltd" --admin-email admin@acme.example   # another tenant
+.venv/bin/python -m app.cli verify-audit-log  # exit 1 if any audit chain is broken
 .venv/bin/uvicorn app.main:app --reload     # http://localhost:8000/docs
 
 # frontend
@@ -298,7 +303,8 @@ endpoint is added without a cross-organisation check.
   and per user for expensive endpoints.
 - Uploads validated by magic bytes and size; CSV/Excel exports neutralise formula injection.
 - Security headers (HSTS, `nosniff`, `DENY` framing, referrer policy); `/docs` disabled in production.
-- Audit log for logins, user changes, uploads, analyses, exports and settings.
+- Audit log for logins, user changes, uploads, analyses, exports and settings: append-only for the app and
+  hash-chained, verified by `python -m app.cli verify-audit-log` or `GET /api/v1/audit-logs/verify`.
 - Organisations isolated by PostgreSQL row-level security (forced, so it also binds the table owner) under a
   role that cannot bypass it; a row cannot be read, written or created outside the current organisation.
 
@@ -316,7 +322,7 @@ e2e/                  real-browser suite (Playwright)
 scripts/              load test, OCR accuracy report, synthetic sheet generator, README media capture
 test-data/           synthetic timesheets are generated here on demand (git-ignored)
 tests/                backend suite
-docs/                 deployment guide, screenshots, demo video
+docs/                 deployment guide, threat model, OCR benchmark, screenshots, demo video
 ```
 
 ## Known limitations
@@ -339,6 +345,9 @@ docs/                 deployment guide, screenshots, demo video
   organisation. E-mail addresses are unique across organisations, since they are the sign-in identity, so
   creating a user with an address another organisation uses is refused, which reveals that it exists. Likewise
   an SSO domain can be approved by only one organisation.
+- The audit chain catches changes to past entries, but not a fake entry appended at the end, and a deleted
+  tail or a fully recomputed chain only against a head recorded outside the database, which the app does
+  not do automatically ([threat model](docs/threat-model.md)).
 - A failed sign-in for an e-mail with no account belongs to no organisation, so no organisation's audit log
   shows it; it is kept in the database.
 - Microsoft 365 sign-in and live e-mail need an Entra ID app registration and were exercised in dry-run mode.
