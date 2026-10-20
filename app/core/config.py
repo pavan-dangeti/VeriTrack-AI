@@ -88,6 +88,14 @@ class Settings(BaseSettings):
     #   inline     — inside the request (tests / scripted demos)
     processing_mode: str = "background"
 
+    # A worker holds a lease on the batch or file it processes and renews it every quarter of this; a lease
+    # that runs out (the worker died) lets another worker take the job over. A file interrupted this many
+    # times is failed rather than retried forever.
+    job_lease_seconds: int = Field(default=120, ge=2)
+    job_max_attempts: int = Field(default=3, ge=1)
+    # GET /metrics needs this bearer token; unset, the endpoint does not exist
+    metrics_token: str | None = None
+
     # Retention policy: timesheet batches + reports older than this many days are
     # purgeable by Master Admin (POST /settings/purge-obsolete-data).
     retention_days: int = 365

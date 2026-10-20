@@ -63,6 +63,10 @@ class UploadBatch(TenantScoped, Base):
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # job lease (migration 0010, app/services/leases.py)
+    lease_token: Mapped[uuid.UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0", default=0)
 
     files: Mapped[list["UploadedFile"]] = relationship(back_populates="batch")
 
@@ -90,6 +94,11 @@ class UploadedFile(TenantScoped, Base):
     error_message: Mapped[str | None] = mapped_column(Text)
     rows_extracted: Mapped[int | None] = mapped_column(Integer)
     extraction_meta: Mapped[dict | None] = mapped_column(JSONB)
+    # job lease (migration 0010, app/services/leases.py)
+    lease_token: Mapped[uuid.UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0", default=0)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
