@@ -1,4 +1,5 @@
 import uuid
+from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile
@@ -222,11 +223,13 @@ async def reprocess_file(
     if file is None:
         raise HTTPException(404, detail={"code": "not_found", "message": "File not found"})
 
-    if file.status is FileStatus.PROCESSING:
+    lease_live = file.lease_expires_at is not None and file.lease_expires_at > datetime.now(UTC)
+    if file.status is FileStatus.PROCESSING and lease_live:
         raise HTTPException(
             409, detail={"code": "busy", "message": "File is being processed right now"}
         )
-    retryable = file.status in (FileStatus.PENDING_OCR, FileStatus.FAILED)
+    # a PROCESSING file whose lease ran out was abandoned by a dead worker: retrying it takes it over
+    retryable = file.status in (FileStatus.PENDING_OCR, FileStatus.FAILED, FileStatus.PROCESSING)
     if not retryable and not force:
         raise HTTPException(
             409,

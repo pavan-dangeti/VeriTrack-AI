@@ -5,6 +5,8 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import metrics
+from app.core.config import settings
 from app.core.logging import get_logger
 from app.models.uploads import (
     BatchKind,
@@ -120,67 +122,105 @@ async def create_batch(
 
 
 async def run_batch_processing(db: AsyncSession, batch_id: str) -> dict:
-    """Processes a batch's files one at a time (bounded memory, fair to other
-    managers' batches). Safe to call twice: the batch and each file are
-    claimed with atomic status transitions."""
-    from sqlalchemy import update
+    """Processes a batch's files one at a time (bounded memory, fair to other managers' batches).
 
-    from app.services.extraction.pipeline import process_uploaded_file
+    The batch is claimed with a lease that is renewed while it runs (app/services/leases.py). If the worker
+    dies, the next one claims the batch once the lease runs out and skips the files already done; progress and
+    the result are written only while the lease is held, so a batch is finished exactly once."""
+    from sqlalchemy import func, or_, update
+
+    from app.services import leases
 
     bid = uuid.UUID(batch_id)
-    claimed = (
-        await db.execute(
-            update(UploadBatch)
-            .where(UploadBatch.id == bid, UploadBatch.status == BatchStatus.QUEUED)
-            .values(status=BatchStatus.PROCESSING)
-            .returning(UploadBatch.id)
-        )
-    ).scalar_one_or_none()
+    token = uuid.uuid4()
+    attempt = (await db.execute(
+        update(UploadBatch)
+        .where(UploadBatch.id == bid, or_(UploadBatch.status == BatchStatus.QUEUED, leases.lapsed(UploadBatch)))
+        .values(status=BatchStatus.PROCESSING, lease_token=token, lease_expires_at=leases.new_expiry(),
+                attempts=UploadBatch.attempts + 1)
+        .returning(UploadBatch.attempts)
+    )).scalar_one_or_none()
     await db.commit()
-    if claimed is None:
-        return {"status": "skipped"}  # missing, or another worker has it
-    batch = await db.get(UploadBatch, bid)
+    if attempt is None:
+        return {"status": "skipped"}  # missing, finished, or a live worker has it
+    metrics.CLAIMS.labels("batch", str(attempt > 1).lower()).inc()
+    log.info("batch_claimed", batch_id=batch_id, attempt=attempt, worker=leases.WORKER)
+
+    def fenced(**values):
+        return (update(UploadBatch).where(UploadBatch.id == bid, UploadBatch.lease_token == token)
+                .values(**values).returning(UploadBatch.id))
+
+    try:
+        return await _process_claimed(db, bid, batch_id, token, attempt, fenced)
+    except Exception:
+        await db.rollback()
+        await db.execute(fenced(status=BatchStatus.FAILED, completed_at=func.now(), lease_token=None,
+                                lease_expires_at=None))
+        await db.commit()
+        log.exception("batch_failed", batch_id=batch_id, attempt=attempt)
+        return {"status": "error"}
+
+
+async def _process_claimed(db: AsyncSession, bid: uuid.UUID, batch_id: str, token: uuid.UUID, attempt: int,
+                           fenced) -> dict:
+    from sqlalchemy import func
+
+    from app.services import leases
+    from app.services.extraction.pipeline import process_uploaded_file
+
+    batch = await db.get(UploadBatch, bid, populate_existing=True)
     if batch is None:
         return {"status": "skipped"}  # purged after it was claimed
 
     stmt = (
-        select(UploadedFile)
-        .where(UploadedFile.batch_id == batch.id)
+        select(UploadedFile.id)
+        .where(UploadedFile.batch_id == bid)
         .order_by(UploadedFile.created_at, UploadedFile.id)
     )
-    files = (await db.execute(stmt)).scalars().all()
-    file_ids = [f.id for f in files]
+    file_ids = list((await db.execute(stmt)).scalars())
 
     processed = failed = pending = 0
-    for fid in file_ids:
-        ok = await process_uploaded_file(db, fid)
-        file = await db.get(UploadedFile, fid, populate_existing=True)
-        status = file.status if file is not None else FileStatus.FAILED
-        if status is FileStatus.PENDING_OCR:
-            pending += 1
-        elif ok or status is FileStatus.DONE:
-            processed += 1
-        else:
-            failed += 1
-        await db.refresh(batch)
-        batch.processed_files = processed
-        batch.failed_files = failed
-        await db.commit()  # live progress for the polling endpoint
+    async with leases.kept(db, UploadBatch, bid, token) as lost:
+        for fid in file_ids:
+            await process_uploaded_file(db, fid)
+            file = await db.get(UploadedFile, fid, populate_existing=True)
+            # held by another live claim (a reprocess request, or a dead worker whose lease has not run out):
+            # wait until it finishes or lapses, then take it over
+            while file is not None and file.status is FileStatus.PROCESSING and not lost.is_set():
+                await asyncio.sleep(settings.job_lease_seconds / 4)
+                await process_uploaded_file(db, fid)
+                file = await db.get(UploadedFile, fid, populate_existing=True)
+            status = file.status if file is not None else FileStatus.FAILED
+            if status is FileStatus.PENDING_OCR:
+                pending += 1
+            elif status is FileStatus.DONE:
+                processed += 1
+            else:
+                failed += 1
+            held = (await db.execute(fenced(processed_files=processed, failed_files=failed))).scalar_one_or_none()
+            await db.commit()  # live progress for the polling endpoint
+            if held is None or lost.is_set():
+                log.warning("batch_lease_lost", batch_id=batch_id, worker=leases.WORKER)
+                return {"status": "lease_lost"}
 
-    batch.status = (
-        BatchStatus.FAILED if failed == len(file_ids) and file_ids else BatchStatus.COMPLETED
-    )
-    batch.completed_at = datetime.now(UTC)
-
+    final = BatchStatus.FAILED if failed == len(file_ids) and file_ids else BatchStatus.COMPLETED
+    # ponytail: no cap on batch re-claims; files cap their own retries, so only a crash while finalising
+    # could loop, and that has not been seen
+    held = (await db.execute(fenced(status=final, completed_at=func.now(), lease_token=None,
+                                    lease_expires_at=None))).scalar_one_or_none()
+    if held is None:
+        await db.rollback()
+        log.warning("batch_lease_lost", batch_id=batch_id, worker=leases.WORKER)
+        return {"status": "lease_lost"}
     if batch.kind is BatchKind.EMPLOYEE_REPO and failed < len(file_ids):
         await _populate_employee_repository(db, batch)
     elif batch.kind is BatchKind.COMPANY_LEAVE and failed < len(file_ids):
         from app.services.leave_service import import_leave_batch
 
         await import_leave_batch(db, batch)
-
     await db.commit()
-    log.info("batch_done", batch_id=batch_id, processed=processed, failed=failed, pending=pending)
+    log.info("batch_done", batch_id=batch_id, processed=processed, failed=failed, pending=pending,
+             attempt=attempt)
     return {"processed": processed, "failed": failed, "pending": pending}
 
 
