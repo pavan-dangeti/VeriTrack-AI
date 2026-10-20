@@ -202,10 +202,11 @@ async def main() -> int:
     ap.add_argument("--metrics-token", default=os.environ.get("METRICS_TOKEN"))
     args = ap.parse_args()
 
-    from scripts.gen_synthetic_timesheets import ensure
+    from scripts.gen_synthetic_timesheets import generate
 
-    if ensure(SYNTHETIC) is None:
-        raise SystemExit("could not generate the synthetic timesheets (needs Playwright + Chromium)")
+    if not (SYNTHETIC / "ground_truth.json").exists():
+        # Playwright's sync API refuses to run inside an event loop; a thread has none
+        await asyncio.to_thread(generate, SYNTHETIC)
     stats = Stats()
     tag = str(int(time.time()))
     accounts = await create_accounts(args.base, stats, args.managers, args.hr, tag)
