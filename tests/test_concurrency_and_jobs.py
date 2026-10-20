@@ -2,6 +2,7 @@
 
 import asyncio
 import uuid
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import func, select
 
@@ -79,11 +80,27 @@ class TestAtomicClaims:
         batch = (await client.post(
             "/api/v1/uploads?kind=TIMESHEET", files=[csv_file("g.csv", TIMESHEET_CSV)], headers=h)).json()
         fid = await _file_id(client, h, batch["id"])
-        async with open_session() as db:
-            (await db.get(UploadedFile, fid)).status = FileStatus.PROCESSING
+        async with open_session() as db:           # a live worker holds the file
+            f = await db.get(UploadedFile, fid)
+            f.status, f.lease_token = FileStatus.PROCESSING, uuid.uuid4()
+            f.lease_expires_at = datetime.now(UTC) + timedelta(minutes=1)
             await db.commit()
         r = await client.post(f"/api/v1/uploads/batches/{batch['id']}/files/{fid}/reprocess?force=true", headers=h)
         assert r.status_code == 409 and r.json()["error"]["code"] == "busy"
+
+    async def test_a_file_abandoned_by_a_dead_worker_can_be_reprocessed(self, client, ma_user_id):
+        h = await manager(client, "cc.abandoned")
+        batch = (await client.post(
+            "/api/v1/uploads?kind=TIMESHEET", files=[csv_file("g.csv", TIMESHEET_CSV)], headers=h)).json()
+        fid = await _file_id(client, h, batch["id"])
+        async with open_session() as db:           # its worker died: the lease ran out
+            f = await db.get(UploadedFile, fid)
+            f.status, f.lease_token = FileStatus.PROCESSING, uuid.uuid4()
+            f.lease_expires_at = datetime.now(UTC) - timedelta(seconds=1)
+            await db.execute(ExtractedRow.__table__.delete().where(ExtractedRow.file_id == fid))
+            await db.commit()
+        r = await client.post(f"/api/v1/uploads/batches/{batch['id']}/files/{fid}/reprocess", headers=h)
+        assert r.status_code == 200 and r.json()["status"] == "DONE", r.text
 
 
 class TestBackgroundMode:
@@ -129,16 +146,41 @@ class TestBackgroundMode:
         h = await manager(client, "bg.recover")
         batch = (await client.post(
             "/api/v1/uploads?kind=TIMESHEET", files=[csv_file("g.csv", TIMESHEET_CSV)], headers=h)).json()
-        async with open_session() as db:           # simulate a crash mid-batch
+        lapsed = datetime.now(UTC) - timedelta(seconds=1)
+        async with open_session() as db:           # simulate a worker that died mid-batch: its leases ran out
             b = await db.get(UploadBatch, uuid.UUID(batch["id"]))
-            b.status = BatchStatus.PROCESSING
-            b.created_at = datetime.now(UTC) - timedelta(hours=1)
+            b.status, b.lease_token, b.lease_expires_at = BatchStatus.PROCESSING, uuid.uuid4(), lapsed
             f = (await db.execute(select(UploadedFile).where(UploadedFile.batch_id == b.id))).scalar_one()
-            f.status = FileStatus.PROCESSING
+            f.status, f.lease_token, f.lease_expires_at, f.attempts = FileStatus.PROCESSING, uuid.uuid4(), lapsed, 1
             await db.execute(ExtractedRow.__table__.delete().where(ExtractedRow.file_id == f.id))
             await db.commit()
         monkeypatch.setattr(settings, "processing_mode", "background")
-        assert await jobs.recover_interrupted_batches() == 1
+        assert await jobs.reap() == {"batches": 1, "files": 0}
         await jobs.drain(10)
         detail = (await client.get(f"/api/v1/uploads/batches/{batch['id']}", headers=h)).json()
         assert detail["status"] == "COMPLETED" and detail["files"][0]["status"] == "DONE"
+        async with open_session() as db:
+            f = await db.get(UploadedFile, f.id, populate_existing=True)
+            rows = (await db.execute(select(func.count()).where(ExtractedRow.file_id == f.id))).scalar_one()
+        assert f.attempts == 2 and f.lease_token is None and rows == 2   # two employees, extracted once
+
+    async def test_a_long_running_batch_with_a_live_lease_is_left_alone(self, client, ma_user_id, monkeypatch):
+        """Recovery used to go by the batch's age: a batch running longer than 10 minutes on another
+        replica was queued again and processed twice. Only a lease that ran out counts now."""
+        from datetime import UTC, datetime, timedelta
+
+        from app.core.config import settings
+        from app.models.uploads import BatchStatus, UploadBatch
+        from app.services import jobs
+
+        h = await manager(client, "bg.live")
+        batch = (await client.post(
+            "/api/v1/uploads?kind=TIMESHEET", files=[csv_file("g.csv", TIMESHEET_CSV)], headers=h)).json()
+        async with open_session() as db:
+            b = await db.get(UploadBatch, uuid.UUID(batch["id"]))
+            b.status, b.lease_token = BatchStatus.PROCESSING, uuid.uuid4()
+            b.created_at = datetime.now(UTC) - timedelta(hours=3)
+            b.lease_expires_at = datetime.now(UTC) + timedelta(minutes=1)
+            await db.commit()
+        monkeypatch.setattr(settings, "processing_mode", "background")
+        assert await jobs.reap() == {"batches": 0, "files": 0}
