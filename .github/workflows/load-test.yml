@@ -1,0 +1,104 @@
+name: Load test
+
+# Manual only: starts PostgreSQL and the API on one GitHub-hosted x86-64 runner, configured as in production
+# (background processing, RapidOCR, one web worker) except ENVIRONMENT=staging, because the runner's database
+# has no TLS. Then runs scripts/load_test.py against it and publishes the report.
+on:
+  workflow_dispatch:
+    inputs:
+      managers:
+        description: Managers (each uploads a repository, a leave register and a timesheet, then analyses)
+        type: number
+        default: 160
+      hr:
+        description: HR users (browse continuously while OCR runs)
+        type: number
+        default: 40
+
+concurrency:
+  group: load-test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  load:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: veritrack
+          POSTGRES_PASSWORD: veritrack
+          POSTGRES_DB: veritrack
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U veritrack" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql+asyncpg://veritrack:veritrack@localhost:5432/veritrack
+      ENVIRONMENT: staging
+      PROCESSING_MODE: background
+      OCR_ENGINE: rapid
+      TRUSTED_PROXY_HOPS: "1"
+      LOCAL_STORAGE_ROOT: /tmp/veritrack-storage
+      ADMIN_EMAIL: load.admin@veritrack.io
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements*.txt
+      - name: Install
+        run: |
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends \
+            fonts-freefont-ttf fonts-dejavu-core fonts-crosextra-carlito fonts-liberation
+          pip install -r requirements-dev.txt
+          playwright install --with-deps chromium
+          pip uninstall -y opencv-python
+          pip install --force-reinstall --no-deps "opencv-python-headless>=4.10"
+      - name: Secrets for this run only
+        run: |
+          for name in JWT_SECRET_KEY ADMIN_PASSWORD METRICS_TOKEN; do
+            value="$(python -c 'import secrets; print(secrets.token_urlsafe(36) + "aA1!")')"
+            echo "::add-mask::$value"
+            echo "$name=$value" >> "$GITHUB_ENV"
+          done
+      - name: Start the API
+        run: |
+          alembic upgrade head
+          python -m app.cli sync-master-admin
+          nohup uvicorn app.main:app --host 127.0.0.1 --port 8000 --no-proxy-headers --workers 1 \
+            > api.log 2>&1 &
+          for _ in $(seq 60); do curl -fs http://127.0.0.1:8000/health/ready && break; sleep 2; done
+          curl -fs http://127.0.0.1:8000/health/ready
+      - name: Load test
+        env:
+          MANAGERS: ${{ inputs.managers }}
+          HR: ${{ inputs.hr }}
+        run: |
+          echo "runner: $(nproc) vCPU, $(free -g | awk '/Mem:/ {print $2}') GB RAM, $(uname -m)"
+          python -m scripts.load_test --base http://127.0.0.1:8000 --managers "$MANAGERS" --hr "$HR" \
+            --out load-report.json
+      - name: Summary
+        if: always()
+        run: |
+          [ -f load-report.json ] || exit 0
+          python - <<'EOF' >> "$GITHUB_STEP_SUMMARY"
+          import json
+          r = json.load(open("load-report.json"))
+          print(f"**{r['users']['total']} users** ({r['users']['managers']} managers, {r['users']['hr']} HR), "
+                f"{r['wall_clock_s']} s, errors: {r['error_count']}, all results correct: {r['all_results_correct']}, "
+                f"isolated: {r['all_users_isolated']}, jobs: {r['jobs']}\n")
+          print("| Requests | Count | p50 | p95 | p99 | max |\n|---|---|---|---|---|---|")
+          rows = [("all except logins and uploads", r["latency_overall"]), *r["latency"].items()]
+          for name, s in rows:
+              print(f"| {name} | {s['count']} | {s['p50_ms']} ms | {s['p95_ms']} ms | {s['p99_ms']} ms | {s['max_ms']} ms |")
+          EOF
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: load-test-report
+          path: |
+            load-report.json
+            api.log
+          retention-days: 90
