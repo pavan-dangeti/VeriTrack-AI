@@ -1,12 +1,11 @@
 """Public demo account: limited, synthetic, and reset to the same state on schedule."""
 
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 
 import pytest
-from sqlalchemy import func, select, text, update
+from sqlalchemy import func, select, text
 
 from app.core.config import settings
-from app.models.audit_log import AuditLog
 from app.models.employees import Employee
 from app.models.leaves import CompanyLeave
 from app.models.uploads import UploadBatch, UploadedFile
@@ -113,13 +112,17 @@ async def test_reset_replaces_data_and_removes_stored_files(client, demo):
             get_storage().get_bytes(key)
 
 
-async def test_reset_runs_only_when_due(client, demo):
+async def test_reset_runs_only_when_due(client, demo, monkeypatch):
     async with open_session() as db:
         assert await demo_service.reset_if_due(db) is True    # never reset before
         assert await demo_service.reset_if_due(db) is False   # just done
-        await db.execute(update(AuditLog).where(AuditLog.action == "DEMO_RESET")
-                         .values(timestamp=datetime.now(UTC) - timedelta(hours=25)))
-        await db.commit()
+
+        class Later(datetime):   # 25 hours on; the audit log itself is append-only
+            @classmethod
+            def now(cls, tz=None):
+                return datetime.now(tz) + timedelta(hours=25)
+
+        monkeypatch.setattr(demo_service, "datetime", Later)
         assert await demo_service.reset_if_due(db) is True
 
 

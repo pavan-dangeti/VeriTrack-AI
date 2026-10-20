@@ -7,6 +7,7 @@ from sqlalchemy import (
     BigInteger,
     DateTime,
     Enum,
+    FetchedValue,
     ForeignKey,
     String,
     Text,
@@ -59,3 +60,7 @@ class AuditLog(Base):
     event_metadata: Mapped[dict[str, Any] | None] = mapped_column(
         "metadata", JSONB, nullable=True
     )
+    # the hash chain, written by a trigger on insert (migration 0009); never set by the application
+    chain_seq: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default=FetchedValue())
+    prev_hash: Mapped[str] = mapped_column(Text, nullable=False, server_default=FetchedValue())
+    entry_hash: Mapped[str] = mapped_column(Text, nullable=False, server_default=FetchedValue())

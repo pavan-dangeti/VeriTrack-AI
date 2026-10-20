@@ -1,6 +1,7 @@
+import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy import func, select
 
@@ -9,6 +10,7 @@ from app.core.permissions import Permission
 from app.models.audit_log import AuditLog, AuditResult
 from app.models.user import User, UserRole
 from app.schemas.audit import AuditLogOut, AuditLogPage
+from app.services import audit_chain, audit_service
 
 router = APIRouter(prefix="/audit-logs", tags=["audit"])
 
@@ -53,6 +55,31 @@ async def list_audit_logs(
         limit=limit,
         offset=offset,
     )
+
+
+@router.get("/verify")
+async def verify_audit_log(
+    viewer: AuditViewer,
+    db: DB,
+    expect_seq: int | None = Query(default=None, ge=1),
+    expect_hash: str | None = Query(default=None, pattern="^[0-9a-f]{64}$"),
+):
+    """Recomputes this organisation's audit chain. Pass a head recorded earlier (expect_seq, expect_hash) to
+    also catch removal of the newest entries or a full rewrite. The check itself is audited."""
+    if (expect_seq is None) != (expect_hash is None):
+        raise HTTPException(422, detail={"code": "bad_anchor",
+                                         "message": "Give both expect_seq and expect_hash, or neither"})
+    anchors: dict[uuid.UUID | None, tuple[int, str]] | None = (
+        {viewer.org_id: (expect_seq, expect_hash)} if expect_seq and expect_hash else None)
+    reports = await audit_chain.verify(db, anchors)
+    report = next((r for r in reports if r.org_id == viewer.org_id), audit_chain.ChainReport(viewer.org_id))
+    await audit_service.record(
+        db, action=audit_service.ACTION_AUDIT_VERIFIED,
+        result=audit_service.AuditResult.SUCCESS if report.ok else audit_service.AuditResult.FAILURE,
+        actor_user_id=viewer.id, target_entity="audit_log",
+        metadata={"entries": report.entries, "head_seq": report.head_seq, "first_break": report.first_break},
+    )
+    return report.as_dict()
 
 
 @router.get("/export.csv")

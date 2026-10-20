@@ -13,6 +13,7 @@ import contextvars
 
 import pytest
 from sqlalchemy import select, text
+from sqlalchemy.exc import ProgrammingError
 
 from app.core.config import settings
 from app.db.tenant import SYSTEM, tenant
@@ -41,6 +42,7 @@ COVERAGE: dict[tuple[str, str], str] = {
     ("PATCH", "/api/v1/users/{user_id}/status"): PROBE,
     ("GET", "/api/v1/audit-logs"): LIST,
     ("GET", "/api/v1/audit-logs/export.csv"): LIST,
+    ("GET", "/api/v1/audit-logs/verify"): LIST,
     ("POST", "/api/v1/uploads"): WRITE,
     ("GET", "/api/v1/uploads/batches"): LIST,
     ("GET", "/api/v1/uploads/batches/{batch_id}"): PROBE,
@@ -344,8 +346,14 @@ async def test_row_level_security_alone_hides_and_blocks_other_organisations_row
                     seen = (await db.execute(text(f"SELECT count(*) FROM {t}"))).scalar_one()  # noqa: S608
                     if seen != truth[(t, org)]:
                         wrong.append(f"{t}: tenant sees {seen} rows, owns {truth[(t, org)]}")
-                    changed = (await db.execute(text(f"UPDATE {t} SET org_id = org_id WHERE org_id = :o"),  # noqa: S608
-                                                {"o": other})).rowcount
+                    try:
+                        async with db.begin_nested():
+                            changed = (await db.execute(
+                                text(f"UPDATE {t} SET org_id = org_id WHERE org_id = :o"),  # noqa: S608
+                                {"o": other})).rowcount
+                    except ProgrammingError as exc:   # audit_logs: no UPDATE for the app at all
+                        assert "permission denied" in str(exc)
+                        changed = 0
                     if changed:
                         wrong.append(f"{t}: tenant updated {changed} of another organisation's rows")
                 await db.rollback()

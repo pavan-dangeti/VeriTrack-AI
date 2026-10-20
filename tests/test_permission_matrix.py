@@ -34,6 +34,7 @@ EXPECTED: dict[tuple[str, str], set[str] | str] = {
     ("PATCH", "/api/v1/users/{user_id}/status"): {MA},
     ("GET", "/api/v1/audit-logs"): {MA},
     ("GET", "/api/v1/audit-logs/export.csv"): {MA},
+    ("GET", "/api/v1/audit-logs/verify"): {MA},
     ("POST", "/api/v1/uploads"): {MG},
     ("GET", "/api/v1/uploads/batches"): ALL,
     ("GET", "/api/v1/uploads/batches/{batch_id}"): ALL,
