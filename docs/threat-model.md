@@ -81,7 +81,9 @@ rows can do it. The chain makes past entries tamper-evident, not new ones trustw
 - **Passwords.** bcrypt, cost 12, hashed off the event loop; lockout after repeated failures.
 - **Transport.** The API refuses a production database connection without TLS; HSTS on responses.
 - **Data retention.** Timesheet batches past the retention window are purged on request
-  (`POST /api/v1/settings/purge-obsolete-data`).
+  (`POST /api/v1/settings/purge-obsolete-data`): their database rows and their stored uploads and reports
+  both go (`test_purge_deletes_stored_files_and_reports_with_the_rows`). Files left behind by purges run
+  before that fix cannot be traced, since their rows are already gone.
 
 ## Known gaps
 
