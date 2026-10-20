@@ -327,6 +327,7 @@ async def file_content(batch_id: uuid.UUID, file_id: uuid.UUID, actor: BatchView
     from app.services.storage import StorageError, get_storage
 
     _batch, file = await _load_file(db, actor, batch_id, file_id)
+    await db.commit()   # release the connection before reading storage
     try:
         data = await asyncio.to_thread(get_storage().get_bytes, file.storage_key)
     except StorageError as exc:

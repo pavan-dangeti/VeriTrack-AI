@@ -84,22 +84,25 @@ async def create_batch(
             raise UploadRuleError(415, exc.code, f"'{filename}': {exc.message}") from exc
         accepted.append((filename, content, detected))
 
-    storage = get_storage()
-    batch = UploadBatch(manager_id=manager.id, kind=kind, total_files=len(files))
-    db.add(batch)
-    await db.flush()
-
     import io
 
-    for filename, content, detected in accepted:
-        key = build_key(
-            manager_id=str(manager.id), kind=kind.value, batch_id=str(batch.id),
-            filename=filename,
-        )
-        stored = await asyncio.to_thread(storage.put, key, io.BytesIO(content), len(content))
-        db.add(
+    # Files go to storage before any row is written: a transaction held open across storage writes ties up
+    # a pooled connection for as long as the writes (and the thread pool queue in front of them) take.
+    storage = get_storage()
+    batch_id = uuid.uuid4()
+    stored_files = []
+    try:
+        for filename, content, detected in accepted:
+            key = build_key(manager_id=str(manager.id), kind=kind.value, batch_id=str(batch_id),
+                            filename=filename)
+            stored = await asyncio.to_thread(storage.put, key, io.BytesIO(content), len(content))
+            stored_files.append((filename, detected, stored))
+        batch = UploadBatch(id=batch_id, manager_id=manager.id, kind=kind, total_files=len(files))
+        db.add(batch)
+        await db.flush()   # the batch row first: its files reference it
+        db.add_all(
             UploadedFile(
-                batch_id=batch.id,
+                batch_id=batch_id,
                 manager_id=manager.id,
                 original_filename=filename,
                 storage_key=stored.key,
@@ -107,7 +110,17 @@ async def create_batch(
                 file_size=stored.size,
                 checksum_sha256=stored.checksum_sha256,
             )
+            for filename, detected, stored in stored_files
         )
+        await db.flush()
+    except BaseException:
+        await db.rollback()
+        for _, _, stored in stored_files:   # nothing references them
+            try:
+                await asyncio.to_thread(storage.delete, stored.key)
+            except Exception as exc:  # noqa: BLE001 — best effort; the upload failed either way
+                log.warning("orphan_upload_not_removed", key=stored.key, error=str(exc)[:200])
+        raise
 
     await audit_service.record(
         db,

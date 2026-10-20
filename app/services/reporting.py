@@ -159,6 +159,7 @@ def build_summary_pdf(run: AnalysisRun, violations) -> bytes:
 async def generate_and_store_reports(db: AsyncSession, run: AnalysisRun) -> dict:
     violations = await _run_rows(db, run)
     skips = run.skipped_rows or []
+    await db.commit()   # no transaction (and pooled connection) held while the reports are built and stored
 
     storage = get_storage()
     made: dict[str, str] = {}
