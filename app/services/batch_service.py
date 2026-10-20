@@ -266,38 +266,29 @@ async def purge_obsolete_batches(
 
     cutoff = datetime.now(UTC) - timedelta(days=retention_days)
 
-    old = (
-        await db.execute(
-            sa_select(UploadBatch).where(UploadBatch.created_at < cutoff)
-        )
-    ).scalars()
-    ids = [b.id for b in old]
-    storage = get_storage()
-
-    file_keys = []
-    for b in old:
-        for f in b.files:
-            file_keys.append(f.storage_key)
-    report_keys = list(
-        (
-            await db.execute(
-                sa_select(GeneratedReport.storage_key)
-                .join(AnalysisRun, AnalysisRun.id == GeneratedReport.run_id)
-                .where(AnalysisRun.batch_id.in_(ids or [uuid.uuid4()]))
-            )
-        ).scalars()
-    )
-
-    for key in file_keys + report_keys:
-        try:
-            storage.delete(key)
-        except Exception as exc:  # noqa: BLE001 — blob cleanup is best-effort
-            log.warning("purge_blob_failed", key=key, error=str(exc))
+    ids = list((await db.execute(sa_select(UploadBatch.id).where(UploadBatch.created_at < cutoff))).scalars())
+    in_old = ids or [uuid.uuid4()]
+    file_keys = list((await db.execute(
+        sa_select(UploadedFile.storage_key).where(UploadedFile.batch_id.in_(in_old))
+    )).scalars())
+    report_keys = list((await db.execute(
+        sa_select(GeneratedReport.storage_key)
+        .join(AnalysisRun, AnalysisRun.id == GeneratedReport.run_id)
+        .where(AnalysisRun.batch_id.in_(in_old))
+    )).scalars())
 
     from sqlalchemy import delete as sa_delete
 
-    await db.execute(sa_delete(UploadBatch).where(UploadBatch.id.in_(ids or [uuid.uuid4()])))
+    # rows first: if storage then fails, a file is orphaned and logged, never a row left pointing at nothing
+    await db.execute(sa_delete(UploadBatch).where(UploadBatch.id.in_(in_old)))
     await db.commit()
+
+    storage = get_storage()
+    for key in file_keys + report_keys:
+        try:
+            await asyncio.to_thread(storage.delete, key)
+        except Exception as exc:  # noqa: BLE001 — blob cleanup is best-effort
+            log.warning("purge_blob_failed", key=key, error=str(exc))
 
     await audit_service.record(
         db,
