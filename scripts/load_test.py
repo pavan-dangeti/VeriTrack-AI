@@ -85,6 +85,15 @@ class User:
     async def call(self, name: str, method: str, url: str, expect: int | tuple = 200, **kw) -> httpx.Response:
         """Records the latency; an unexpected status or a dropped connection is recorded as an error and
         ends this user's flow (FlowError), never the whole run."""
+        r = await self._timed(name, method, url, **kw)
+        if r.status_code == 401 and name != "login" and await self.refresh():
+            r = await self._timed(name, method, url, **kw)   # the access token expired (15 min): renewed, retry
+        if r.status_code not in (expect if isinstance(expect, tuple) else (expect,)):
+            self.stats.errors.append(f"{name}: {r.status_code} {r.text[:160]}")
+            raise FlowError(name)
+        return r
+
+    async def _timed(self, name: str, method: str, url: str, **kw) -> httpx.Response:
         t = time.perf_counter()
         try:
             r = await self.http.request(method, url, **kw)
@@ -92,10 +101,19 @@ class User:
             self.stats.errors.append(f"{name}: {type(exc).__name__}")
             raise FlowError(name) from exc
         self.stats.add(name, time.perf_counter() - t)
-        if r.status_code not in (expect if isinstance(expect, tuple) else (expect,)):
-            self.stats.errors.append(f"{name}: {r.status_code} {r.text[:160]}")
-            raise FlowError(name)
         return r
+
+    async def refresh(self) -> bool:
+        """What the browser does when the access token expires: a CSRF token, then the refresh cookie."""
+        csrf = await self._timed("refresh", "POST", "/api/v1/auth/csrf")
+        if csrf.status_code != 200:
+            return False
+        r = await self._timed("refresh", "POST", "/api/v1/auth/refresh",
+                              headers={"X-CSRF-Token": csrf.json()["csrf_token"]})
+        if r.status_code != 200:
+            return False
+        self.http.headers["Authorization"] = f"Bearer {r.json()['access_token']}"
+        return True
 
     async def login(self, email: str, password: str) -> None:
         r = await self.call("login", "POST", "/api/v1/auth/login", json={"email": email, "password": password})
