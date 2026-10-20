@@ -73,18 +73,28 @@ class Stats:
         return self._percentiles([x for name, xs in self.latency.items() if name not in exclude for x in xs])
 
 
+class FlowError(Exception):
+    """A step of one user's flow failed (already recorded in Stats.errors)."""
+
+
 class User:
     def __init__(self, base: str, ip: str, stats: Stats) -> None:
         self.http = httpx.AsyncClient(base_url=base, timeout=300, headers={"X-Forwarded-For": ip})
         self.stats = stats
 
     async def call(self, name: str, method: str, url: str, expect: int | tuple = 200, **kw) -> httpx.Response:
+        """Records the latency; an unexpected status or a dropped connection is recorded as an error and
+        ends this user's flow (FlowError), never the whole run."""
         t = time.perf_counter()
-        r = await self.http.request(method, url, **kw)
+        try:
+            r = await self.http.request(method, url, **kw)
+        except httpx.HTTPError as exc:
+            self.stats.errors.append(f"{name}: {type(exc).__name__}")
+            raise FlowError(name) from exc
         self.stats.add(name, time.perf_counter() - t)
-        ok = r.status_code in (expect if isinstance(expect, tuple) else (expect,))
-        if not ok:
+        if r.status_code not in (expect if isinstance(expect, tuple) else (expect,)):
             self.stats.errors.append(f"{name}: {r.status_code} {r.text[:160]}")
+            raise FlowError(name)
         return r
 
     async def login(self, email: str, password: str) -> None:
@@ -113,6 +123,13 @@ async def create_accounts(base: str, stats: Stats, managers: int, hr: int, tag: 
 
 
 async def manager_flow(base: str, stats: Stats, email: str, password: str, i: int, results: dict) -> None:
+    try:
+        await _manager_flow(base, stats, email, password, i, results)
+    except FlowError as exc:
+        results[email] = {"correct": False, "isolated": True, "failed_step": str(exc)}
+
+
+async def _manager_flow(base: str, stats: Stats, email: str, password: str, i: int, results: dict) -> None:
     u = User(base, f"198.51.{i // 250}.{i % 250 + 1}", stats)
     await u.login(email, password)
     await u.call("upload_repo", "POST", "/api/v1/uploads?kind=EMPLOYEE_REPO", 201,
@@ -154,13 +171,19 @@ async def manager_flow(base: str, stats: Stats, email: str, password: str, i: in
 
 async def hr_browse(base: str, stats: Stats, email: str, password: str, i: int, stop: asyncio.Event) -> None:
     u = User(base, f"203.0.113.{i + 1}", stats)
-    await u.login(email, password)
-    while not stop.is_set():
-        await u.call("browse_dashboard", "GET", "/api/v1/dashboard/summary")
-        await u.call("browse_batches", "GET", "/api/v1/uploads/batches")
-        await u.call("browse_employees", "GET", "/api/v1/employees")
-        await u.call("browse_leaves", "GET", "/api/v1/leaves")
-        await asyncio.sleep(0.5)
+    try:
+        await u.login(email, password)
+        while not stop.is_set():
+            for name, url in (("browse_dashboard", "/api/v1/dashboard/summary"),
+                              ("browse_batches", "/api/v1/uploads/batches"),
+                              ("browse_employees", "/api/v1/employees"), ("browse_leaves", "/api/v1/leaves")):
+                try:
+                    await u.call(name, "GET", url)
+                except FlowError:
+                    pass   # recorded; keep browsing
+            await asyncio.sleep(0.5)
+    except FlowError:
+        pass   # could not sign in: recorded
     await u.http.aclose()
 
 
@@ -228,12 +251,14 @@ async def main() -> int:
         "users": {"managers": args.managers, "hr": args.hr, "total": args.managers + args.hr},
         "client_cpus": os.cpu_count(),
         "wall_clock_s": round(wall, 1),
-        "sheets_processed": len(results),
+        "sheets_processed": sum(1 for r in results.values() if "sheet" in r),
+        "failed_flows": {e: r["failed_step"] for e, r in results.items() if "failed_step" in r},
         "all_results_correct": all(r["correct"] for r in results.values()),
         "all_users_isolated": all(r["isolated"] for r in results.values()),
         "ocr_wait_s": {
-            "p50": statistics.median(r["ocr_wait_s"] for r in results.values()),
-            "max": max(r["ocr_wait_s"] for r in results.values()),
+            "p50": statistics.median(waits) if (waits := [r["ocr_wait_s"] for r in results.values()
+                                                            if "ocr_wait_s" in r]) else None,
+            "max": max(waits) if waits else None,
         },
         "errors": stats.errors[:20],
         "error_count": len(stats.errors),
