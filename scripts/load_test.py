@@ -4,9 +4,12 @@
 
 Every simulated user comes from its own client address (X-Forwarded-For, one
 trusted proxy hop), logs in at the same moment, and managers each upload an
-employee repository, a leave register and a timesheet screenshot, wait for OCR,
-run the analysis and check the result. HR users keep browsing the whole time
-so the report shows how responsive the API stays while OCR is busy. Results
+employee repository, a leave register and a timesheet screenshot, wait for OCR
+(polling as the frontend does: every 1.5 s at first, slowing to every 10 s as the
+upload ages), run the analysis and check the result. HR users keep browsing the
+whole time, one page every HR_THINK_S seconds, so the report shows how responsive
+the API stays while OCR is busy. A run stops after --max-minutes; users still
+going then are reported as timed out. Results
 are checked per user: the right violations, and no other manager's data. With --metrics-token, the API's
 /metrics is read at the end to check that every file was claimed exactly once (no takeovers, no discarded
 results) while under load.
@@ -45,6 +48,14 @@ LEAVE_CSV = (
     "141220,01/07/2025,\n141220,03-Jul-2025,\n141220,2025-07-14,\n"
     "197061,02-Jun-2025,03-Jun-2025\n197061,11/06/2025,\n"
 )
+
+
+HR_THINK_S = 5.0   # a person reading a page before opening the next
+
+
+def poll_delay(age_s: float) -> float:
+    """The frontend's poll interval (frontend/src/api/hooks.ts pollDelay) for work this many seconds old."""
+    return min(10.0, max(1.5, age_s / 6))
 
 
 class Stats:
@@ -163,7 +174,7 @@ async def _manager_flow(base: str, stats: Stats, email: str, password: str, i: i
         detail = (await u.call("poll_batch", "GET", f"/api/v1/uploads/batches/{batch['id']}")).json()
         if detail["status"] in ("COMPLETED", "FAILED"):
             break
-        await asyncio.sleep(2)
+        await asyncio.sleep(poll_delay(time.perf_counter() - t0))
     ocr_wait = time.perf_counter() - t0
     await u.call("analyze", "POST", f"/api/v1/batches/{batch['id']}/analyze", 202)
     while True:
@@ -191,15 +202,17 @@ async def hr_browse(base: str, stats: Stats, email: str, password: str, i: int, 
     u = User(base, f"203.0.113.{i + 1}", stats)
     try:
         await u.login(email, password)
+        pages = (("browse_dashboard", "/api/v1/dashboard/summary"), ("browse_batches", "/api/v1/uploads/batches"),
+                 ("browse_employees", "/api/v1/employees"), ("browse_leaves", "/api/v1/leaves"))
         while not stop.is_set():
-            for name, url in (("browse_dashboard", "/api/v1/dashboard/summary"),
-                              ("browse_batches", "/api/v1/uploads/batches"),
-                              ("browse_employees", "/api/v1/employees"), ("browse_leaves", "/api/v1/leaves")):
+            for name, url in pages:
+                if stop.is_set():
+                    break
                 try:
                     await u.call(name, "GET", url)
                 except FlowError:
                     pass   # recorded; keep browsing
-            await asyncio.sleep(0.5)
+                await asyncio.sleep(HR_THINK_S)
     except FlowError:
         pass   # could not sign in: recorded
     await u.http.aclose()
@@ -229,8 +242,10 @@ async def queue_metrics(base: str, token: str | None, expected_files: int) -> di
         "batch_takeovers": value("veritrack_job_claims_total", job="batch", takeover="true"),
         "expected_files": expected_files,
     }
-    out["exactly_once"] = (out["files_done"] == out["file_claims"] == expected_files
+    # no file claimed twice or finished twice; separately, whether every file got finished
+    out["exactly_once"] = (out["file_claims"] <= expected_files and out["files_done"] <= out["file_claims"]
                            and not (out["file_takeovers"] or out["batch_takeovers"] or out["results_discarded"]))
+    out["all_files_done"] = out["files_done"] == expected_files
     return out
 
 
@@ -241,6 +256,7 @@ async def main() -> int:
     ap.add_argument("--hr", type=int, default=10)
     ap.add_argument("--out", default=None)
     ap.add_argument("--metrics-token", default=os.environ.get("METRICS_TOKEN"))
+    ap.add_argument("--max-minutes", type=float, default=30)
     args = ap.parse_args()
 
     from scripts.gen_synthetic_timesheets import generate
@@ -258,8 +274,13 @@ async def main() -> int:
     started = time.perf_counter()
     browsers = [asyncio.create_task(hr_browse(args.base, stats, e, p, i, stop))
                 for role, e, p, i in accounts if role == "HR"]
-    await asyncio.gather(*(manager_flow(args.base, stats, e, p, i, results)
-                           for role, e, p, i in accounts if role == "MANAGER"))
+    flows = {asyncio.create_task(manager_flow(args.base, stats, e, p, i, results)): e
+             for role, e, p, i in accounts if role == "MANAGER"}
+    _, unfinished = await asyncio.wait(flows, timeout=args.max_minutes * 60)
+    for task in unfinished:
+        task.cancel()
+        results[flows[task]] = {"correct": False, "isolated": True, "failed_step": "timed out"}
+    await asyncio.gather(*unfinished, return_exceptions=True)
     stop.set()
     await asyncio.gather(*browsers)
     wall = time.perf_counter() - started
@@ -267,6 +288,9 @@ async def main() -> int:
 
     report = {
         "users": {"managers": args.managers, "hr": args.hr, "total": args.managers + args.hr},
+        "workload": {"hr_think_s": HR_THINK_S, "poll": "1.5 s, slowing to 10 s as the upload ages",
+                     "max_minutes": args.max_minutes},
+        "timed_out": len(unfinished),
         "client_cpus": os.cpu_count(),
         "wall_clock_s": round(wall, 1),
         "sheets_processed": sum(1 for r in results.values() if "sheet" in r),
@@ -290,7 +314,7 @@ async def main() -> int:
     print(text)
     if args.out:
         Path(args.out).write_text(text)
-    exactly_once = jobs is None or jobs["exactly_once"]
+    exactly_once = jobs is None or (jobs["exactly_once"] and jobs["all_files_done"])
     return 0 if report["all_results_correct"] and report["all_users_isolated"] and not stats.errors \
         and exactly_once else 1
 
