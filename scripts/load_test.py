@@ -1,13 +1,15 @@
 """Concurrent-user load test against a running API.
 
-    python -m scripts.load_test --base http://localhost:8000 --managers 40 --hr 10
+    python -m scripts.load_test --base http://localhost:8000 --managers 160 --hr 40 [--metrics-token T]
 
 Every simulated user comes from its own client address (X-Forwarded-For, one
 trusted proxy hop), logs in at the same moment, and managers each upload an
 employee repository, a leave register and a timesheet screenshot, wait for OCR,
 run the analysis and check the result. HR users keep browsing the whole time
 so the report shows how responsive the API stays while OCR is busy. Results
-are checked per user: the right violations, and no other manager's data.
+are checked per user: the right violations, and no other manager's data. With --metrics-token, the API's
+/metrics is read at the end to check that every file was claimed exactly once (no takeovers, no discarded
+results) while under load.
 
 Needs a Master Admin (ADMIN_EMAIL / ADMIN_PASSWORD env vars).
 """
@@ -17,6 +19,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import math
 import os
 import statistics
 import time
@@ -52,17 +55,22 @@ class Stats:
     def add(self, name: str, seconds: float) -> None:
         self.latency.setdefault(name, []).append(seconds * 1000)
 
+    @staticmethod
+    def _percentiles(xs: list[float]) -> dict:
+        xs = sorted(xs)
+
+        def pct(p: float) -> float:   # nearest rank: the smallest value with at least p of the samples at or below
+            return round(xs[max(0, math.ceil(p * len(xs)) - 1)], 1)
+
+        return {"count": len(xs), "p50_ms": pct(0.50), "p95_ms": pct(0.95), "p99_ms": pct(0.99),
+                "max_ms": round(xs[-1], 1)}
+
     def summary(self) -> dict:
-        out = {}
-        for name, xs in sorted(self.latency.items()):
-            xs = sorted(xs)
-            out[name] = {
-                "count": len(xs),
-                "p50_ms": round(statistics.median(xs), 1),
-                "p95_ms": round(xs[int(0.95 * (len(xs) - 1))], 1),
-                "max_ms": round(xs[-1], 1),
-            }
-        return out
+        return {name: self._percentiles(xs) for name, xs in sorted(self.latency.items())}
+
+    def overall(self, exclude: tuple[str, ...]) -> dict:
+        """Every request except the named kinds (logins and uploads, which are deliberately slow)."""
+        return self._percentiles([x for name, xs in self.latency.items() if name not in exclude for x in xs])
 
 
 class User:
@@ -156,12 +164,42 @@ async def hr_browse(base: str, stats: Stats, email: str, password: str, i: int, 
     await u.http.aclose()
 
 
+async def queue_metrics(base: str, token: str | None, expected_files: int) -> dict | None:
+    """What the API's /metrics says about the run: files by outcome, first claims and takeovers."""
+    if not token:
+        return None
+    from prometheus_client.parser import text_string_to_metric_families
+
+    async with httpx.AsyncClient(base_url=base, timeout=30) as http:
+        r = await http.get("/metrics", headers={"Authorization": f"Bearer {token}"})
+    r.raise_for_status()
+    samples = {(s.name, tuple(sorted(s.labels.items()))): s.value
+               for family in text_string_to_metric_families(r.text) for s in family.samples}
+
+    def value(name: str, **labels) -> int:
+        return int(samples.get((name, tuple(sorted(labels.items()))), 0))
+
+    out = {
+        "files_done": value("veritrack_ocr_files_total", outcome="done"),
+        "files_failed": value("veritrack_ocr_files_total", outcome="failed"),
+        "results_discarded": value("veritrack_ocr_files_total", outcome="discarded"),
+        "file_claims": value("veritrack_job_claims_total", job="file", takeover="false"),
+        "file_takeovers": value("veritrack_job_claims_total", job="file", takeover="true"),
+        "batch_takeovers": value("veritrack_job_claims_total", job="batch", takeover="true"),
+        "expected_files": expected_files,
+    }
+    out["exactly_once"] = (out["files_done"] == out["file_claims"] == expected_files
+                           and not (out["file_takeovers"] or out["batch_takeovers"] or out["results_discarded"]))
+    return out
+
+
 async def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--base", default="http://localhost:8000")
     ap.add_argument("--managers", type=int, default=40)
     ap.add_argument("--hr", type=int, default=10)
     ap.add_argument("--out", default=None)
+    ap.add_argument("--metrics-token", default=os.environ.get("METRICS_TOKEN"))
     args = ap.parse_args()
 
     from scripts.gen_synthetic_timesheets import ensure
@@ -183,9 +221,11 @@ async def main() -> int:
     stop.set()
     await asyncio.gather(*browsers)
     wall = time.perf_counter() - started
+    jobs = await queue_metrics(args.base, args.metrics_token, expected_files=3 * args.managers)
 
     report = {
-        "users": {"managers": args.managers, "hr": args.hr},
+        "users": {"managers": args.managers, "hr": args.hr, "total": args.managers + args.hr},
+        "client_cpus": os.cpu_count(),
         "wall_clock_s": round(wall, 1),
         "sheets_processed": len(results),
         "all_results_correct": all(r["correct"] for r in results.values()),
@@ -196,14 +236,19 @@ async def main() -> int:
         },
         "errors": stats.errors[:20],
         "error_count": len(stats.errors),
+        "latency_overall": stats.overall(exclude=("login", "create_user", "upload_repo", "upload_leaves",
+                                                  "upload_timesheets")),
         "latency": stats.summary(),
+        "jobs": jobs,
         "wrong": {e: r for e, r in results.items() if not (r["correct"] and r["isolated"])},
     }
     text = json.dumps(report, indent=2)
     print(text)
     if args.out:
         Path(args.out).write_text(text)
-    return 0 if report["all_results_correct"] and report["all_users_isolated"] and not stats.errors else 1
+    exactly_once = jobs is None or jobs["exactly_once"]
+    return 0 if report["all_results_correct"] and report["all_users_isolated"] and not stats.errors \
+        and exactly_once else 1
 
 
 if __name__ == "__main__":
