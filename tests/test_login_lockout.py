@@ -1,5 +1,6 @@
 """Password login: generic errors, account lockout after 5 failures/15min."""
 
+import threading
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select, update
@@ -165,6 +166,8 @@ class TestNoConnectionHeldDuringBcrypt:
         real = getattr(module, name)
 
         def watched(*args, **kwargs):
+            # and on bcrypt's own pool, not the default one that storage I/O shares
+            assert threading.current_thread().name.startswith("bcrypt"), threading.current_thread().name
             held.append(engine.pool.checkedout())
             return real(*args, **kwargs)
 
