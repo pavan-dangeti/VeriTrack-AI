@@ -87,8 +87,9 @@ jobs:
           import json
           r = json.load(open("load-report.json"))
           print(f"**{r['users']['total']} users** ({r['users']['managers']} managers, {r['users']['hr']} HR), "
-                f"{r['wall_clock_s']} s, errors: {r['error_count']}, all results correct: {r['all_results_correct']}, "
-                f"isolated: {r['all_users_isolated']}, jobs: {r['jobs']}\n")
+                f"{r['wall_clock_s']} s, timed out: {r['timed_out']}, errors: {r['error_count']}, "
+                f"all results correct: {r['all_results_correct']}, isolated: {r['all_users_isolated']}\n\n"
+                f"workload: {r['workload']}\n\njobs: {r['jobs']}\n")
           print("| Requests | Count | p50 | p95 | p99 | max |\n|---|---|---|---|---|---|")
           rows = [("all except logins and uploads", r["latency_overall"]), *r["latency"].items()]
           for name, s in rows:
