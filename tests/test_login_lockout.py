@@ -8,6 +8,8 @@ from app.models.user import User
 from tests.conftest import (
     MA_EMAIL,
     MA_PASSWORD,
+    auth_headers,
+    login_access_token,
     open_session,
 )
 
@@ -148,3 +150,46 @@ class TestLockout:
                 await db.execute(select(User).where(User.email == MA_EMAIL))
             ).scalar_one()
             assert user.failed_login_attempts == 0
+
+
+class TestNoConnectionHeldDuringBcrypt:
+    """bcrypt takes a quarter of a second per call, and far longer when 200 users sign in at once on 2 vCPUs.
+    A database connection held through it starves the pool: the 200-user load test hit pool timeouts (HTTP
+    500) until sign-in and user creation released the connection before hashing."""
+
+    @staticmethod
+    def _watch(monkeypatch, module, name, held=None):
+        from app.db.session import engine
+
+        held = [] if held is None else held
+        real = getattr(module, name)
+
+        def watched(*args, **kwargs):
+            held.append(engine.pool.checkedout())
+            return real(*args, **kwargs)
+
+        monkeypatch.setattr(module, name, watched)
+        return held
+
+    async def test_sign_in(self, client, ma_user_id, monkeypatch):
+        from app.services import auth_service
+
+        held = self._watch(monkeypatch, auth_service, "verify_password")
+        self._watch(monkeypatch, auth_service, "hash_password", held)
+        from app.core.rate_limit import limiter
+
+        for email, password, status in ((MA_EMAIL, MA_PASSWORD, 200), (MA_EMAIL, "Wrong!Pass123", 401),
+                                        ("nobody@veritrack.io", "Wrong!Pass123", 401)):
+            limiter.reset()
+            r = await client.post("/api/v1/auth/login", json={"email": email, "password": password})
+            assert r.status_code == status, r.text
+        assert held == [0, 0, 0], held   # right password, wrong password, unknown e-mail
+
+    async def test_user_creation(self, client, ma_user_id, monkeypatch):
+        from app.services import user_service
+
+        held = self._watch(monkeypatch, user_service, "hash_password")
+        token = await login_access_token(client, MA_EMAIL, MA_PASSWORD)
+        r = await client.post("/api/v1/users", headers=auth_headers(token),
+                              json={"email": "pool.check@veritrack.io", "role": "MANAGER"})
+        assert r.status_code == 201 and held == [0], held

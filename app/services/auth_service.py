@@ -77,6 +77,8 @@ async def authenticate_password(
     """
     now = datetime.now(UTC)
     user = await get_user_by_email(db, email)
+    # end the transaction: bcrypt below takes seconds under load, and must not hold a pooled connection
+    await db.commit()
 
     if user is None:
         # Burn comparable CPU time to blunt timing-based user enumeration.

@@ -53,6 +53,7 @@ async def create_user(
 
     normalized_email = email.strip().lower()
     existing = await get_by_email(db, normalized_email)
+    await db.commit()   # release the connection before bcrypt
     if existing is not None:
         raise UserRuleError(409, "email_taken", "A user with this email already exists")
 
