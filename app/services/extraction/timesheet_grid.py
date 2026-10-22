@@ -635,7 +635,7 @@ def _classify_fill(rgb_color) -> str:
     if sat > 90 and val > 60:
         if hue >= 330 or hue <= 15:
             return "REJECTED"      # red
-        if 15 < hue <= 70:
+        if hue <= 70:
             return "SUBMITTED"     # amber
         if 90 <= hue <= 170:
             return "APPROVED"      # green

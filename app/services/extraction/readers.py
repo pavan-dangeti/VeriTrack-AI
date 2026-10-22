@@ -148,14 +148,6 @@ def read_image_via_ocr(data: bytes, content_type: str) -> list[RawTable]:
     return engine.extract_tables(data, content_type)
 
 
-READERS = {
-    "text/csv": read_csv,
-    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": read_xlsx,
-    "application/vnd.ms-excel": read_xls,
-    "application/pdf": lambda data: read_pdf_or_ocr(data),
-}
-
-
 def read_pdf_or_ocr(data: bytes) -> list[RawTable]:
     try:
         return read_pdf_text_layer(data)
@@ -163,6 +155,14 @@ def read_pdf_or_ocr(data: bytes) -> list[RawTable]:
         if "pdf_no_text_layer" in str(exc):
             return read_image_via_ocr(data, "application/pdf")
         raise
+
+
+READERS = {
+    "text/csv": read_csv,
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": read_xlsx,
+    "application/vnd.ms-excel": read_xls,
+    "application/pdf": read_pdf_or_ocr,
+}
 
 
 def read_any(content_type: str, data: bytes) -> list[RawTable]:

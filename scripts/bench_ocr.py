@@ -510,8 +510,8 @@ def report(dirs: list[Path]) -> str:
              f"**{meta.get('set', 'unknown').capitalize()} set** (seed {meta.get('seed')}). "
              f"Engine **{meta['engine']}**, preprocessing **{'on' if meta['preprocess'] else 'off'}**, "
              f"`{meta['machine']}`, Python {meta['python']}, commit `{meta['commit']}`, {len(rows)} sheets.", "",
-             "| Group | Sheets | Exact | Flagged | **Verified but wrong** | Verified, unchecked field wrong | Error | "
-             "Field accuracy | Cell accuracy |", "|---|---|---|---|---|---|---|---|---|"]
+             ("| Group | Sheets | Exact | Flagged | **Verified but wrong** | Verified, unchecked field wrong | Error | "
+              "Field accuracy | Cell accuracy |"), "|---|---|---|---|---|---|---|---|---|"]
     for label, sel in [("**All**", rows)] + [(t, [r for r in rows if r["type"] == t]) for t in DEGRADATIONS]:
         a = _agg(sel)
         if not a["n"]:
