@@ -1,0 +1,50 @@
+name: Bug report
+description: Something doesn't work as the README or docs say it should.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please don't report security vulnerabilities here; see [SECURITY.md](../blob/main/SECURITY.md).
+        Use synthetic data only: never attach real timesheets or personal data.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Sign in as a Manager
+        2. Upload …
+        3. …
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      placeholder: v3.0.0, or a commit SHA
+    validations:
+      required: true
+  - type: dropdown
+    id: where
+    attributes:
+      label: Where
+      options:
+        - Live demo
+        - Local (docker compose)
+        - Local (uvicorn + vite)
+        - Own deployment
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or screenshots
+      description: API log lines (they include a request id), browser console errors, or screenshots.
+      render: text
