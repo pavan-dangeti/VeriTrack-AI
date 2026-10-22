@@ -10,12 +10,16 @@ VeriTrack reads timesheet screenshots with a purpose-built OCR pipeline, proves 
 the sheet's own totals, and flags any leave day on a timesheet that is missing from the leave register.
 
 ![Python](https://img.shields.io/badge/Python-3.12-3776AB?style=flat-square&logo=python&logoColor=white)
-![FastAPI](https://img.shields.io/badge/FastAPI-0.141-009688?style=flat-square&logo=fastapi&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-0.118%2B-009688?style=flat-square&logo=fastapi&logoColor=white)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1?style=flat-square&logo=postgresql&logoColor=white)
 ![React](https://img.shields.io/badge/React-19-20232A?style=flat-square&logo=react&logoColor=61DAFB)
 ![TypeScript](https://img.shields.io/badge/TypeScript-6-3178C6?style=flat-square&logo=typescript&logoColor=white)
 [![CI](https://github.com/pavan-dangeti/VeriTrack-AI/actions/workflows/ci.yml/badge.svg)](https://github.com/pavan-dangeti/VeriTrack-AI/actions/workflows/ci.yml)
-![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
+[![Live demo](https://img.shields.io/badge/live%20demo-veritrack--nine.vercel.app-4f46e5?style=flat-square)](https://veritrack-nine.vercel.app)
+
+**[Try the live demo](https://veritrack-nine.vercel.app)**: the sign-in page shows a demo Manager account with
+synthetic data, reset daily. The free-plan API sleeps when idle, so the first request can be slow.
 
 <img src="docs/media/demo.gif" alt="Upload four timesheet screenshots, watch them get verified, review one sheet and run the leave analysis" width="900" />
 
@@ -23,6 +27,18 @@ the sheet's own totals, and flags any leave day on a timesheet that is missing f
 Full-quality video: <a href="docs/media/demo.mp4">docs/media/demo.mp4</a></sub>
 
 </div>
+
+**At a glance**
+
+| | Result | Reproduce |
+|---|---|---|
+| OCR, 220 held-out sheets (x86-64) | 96 read exactly; **1 passed verification with a wrong value** | `gh workflow run ocr-benchmark.yml -f seed=4729` |
+| 200 concurrent users, 2 vCPU | steady-state p50 26–29 ms; **480/480 files processed exactly once**, 0 errors | `gh workflow run load-test.yml` |
+| Tests | 379 backend · 59 frontend · 48 end-to-end in a real browser | `pytest tests` · `npm test` · `pytest e2e` |
+
+React on Vercel → FastAPI on Render → PostgreSQL with row-level security per organisation, a hash-chained
+audit log, and leased background jobs for OCR. Details: [Architecture](#architecture) ·
+[design doc](docs/design.md) · [threat model](docs/threat-model.md).
 
 ---
 
@@ -34,6 +50,7 @@ Full-quality video: <a href="docs/media/demo.mp4">docs/media/demo.mp4</a></sub>
 - [Getting started](#getting-started) · [Configuration](#configuration) · [Deployment](#deployment)
 - [Roles](#roles-and-permissions) · [Security](#security) · [Project layout](#project-layout) · [Limitations](#known-limitations)
 - Design doc: [docs/design.md](docs/design.md) · Threat model: [docs/threat-model.md](docs/threat-model.md)
+- [Changelog](CHANGELOG.md) · [Security policy](SECURITY.md) · [Development history](docs/development-history.md)
 
 ## Why
 
