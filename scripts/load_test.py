@@ -273,7 +273,7 @@ async def main() -> int:
     ap.add_argument("--hr", type=int, default=10)
     ap.add_argument("--out", default=None)
     ap.add_argument("--metrics-token", default=os.environ.get("METRICS_TOKEN"))
-    ap.add_argument("--max-minutes", type=float, default=30)
+    ap.add_argument("--max-minutes", type=float, default=40)
     ap.add_argument("--ramp-seconds", type=float, default=0,
                     help="spread the sign-ins evenly over this many seconds (0: all at once)")
     args = ap.parse_args()
