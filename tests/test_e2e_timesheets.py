@@ -135,10 +135,6 @@ class TestEndToEnd:
         batch_id = r.json()["id"]
         await client.post(f"/api/v1/batches/{batch_id}/analyze", headers=headers)
 
-        pdf = await client.get(f"/api/v1/runs-batch/{batch_id}/reports/summary.pdf",
-                               headers=headers)
-        xlsx = await client.get(f"/api/v1/runs-batch/{batch_id}/reports/3tab.xlsx",
-                                headers=headers)
         # the route needs the run id, so fetch the analysis first
         analysis = (await client.get(
             f"/api/v1/batches/{batch_id}/analysis", headers=headers)).json()

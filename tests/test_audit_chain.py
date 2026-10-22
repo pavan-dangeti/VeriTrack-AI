@@ -230,6 +230,7 @@ def test_the_migration_chains_existing_entries_exactly_as_the_trigger_does():
                     return [tuple(r) for r in rows]
         finally:
             await eng.dispose()
+        return None
 
     one, two = "11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222"
     entries = [one, None, two, one, None, one, two]   # interleaved, as real traffic is

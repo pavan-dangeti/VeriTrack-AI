@@ -98,7 +98,8 @@ async def test_a_killed_worker_s_batch_is_finished_exactly_once_by_another(batch
     mid = await _state(batch_id)
     assert mid["status"] is BatchStatus.PROCESSING
     by_name = {name: rest for name, *rest in mid["files"]}
-    assert by_name.pop("f2.csv") == [FileStatus.PROCESSING, 1, 0]
+    f2 = by_name.pop("f2.csv")
+    assert f2 == [FileStatus.PROCESSING, 1, 0]
     assert all(rest in ([FileStatus.DONE, 1, 1], [FileStatus.QUEUED, 0, 0]) for rest in by_name.values())
     done_before = {name: mid["row_ids"][name] for name, rest in by_name.items() if rest[0] is FileStatus.DONE}
 
