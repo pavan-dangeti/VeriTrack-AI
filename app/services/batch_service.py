@@ -134,6 +134,15 @@ async def create_batch(
     return batch
 
 
+def fenced_batch_update(batch_id: uuid.UUID, token: uuid.UUID, **values):
+    """One conditional UPDATE: it changes the batch only while `token` still holds its lease, so a worker that
+    lost the lease writes nothing (0 rows), with no gap between a check and the write."""
+    from sqlalchemy import update
+
+    return (update(UploadBatch).where(UploadBatch.id == batch_id, UploadBatch.lease_token == token)
+            .values(**values).returning(UploadBatch.id))
+
+
 async def run_batch_processing(db: AsyncSession, batch_id: str) -> dict:
     """Processes a batch's files one at a time (bounded memory, fair to other managers' batches).
 
@@ -160,8 +169,7 @@ async def run_batch_processing(db: AsyncSession, batch_id: str) -> dict:
     log.info("batch_claimed", batch_id=batch_id, attempt=attempt, worker=leases.WORKER)
 
     def fenced(**values):
-        return (update(UploadBatch).where(UploadBatch.id == bid, UploadBatch.lease_token == token)
-                .values(**values).returning(UploadBatch.id))
+        return fenced_batch_update(bid, token, **values)
 
     try:
         return await _process_claimed(db, bid, batch_id, token, attempt, fenced)
