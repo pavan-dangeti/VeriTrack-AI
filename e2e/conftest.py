@@ -382,10 +382,14 @@ class RoleSession:
 
 def grid_filter(page, col_id: str, text: str) -> None:
     """Type into an AG Grid column's text filter (header filter button)."""
-    page.locator(f".ag-header-cell[col-id={col_id}] .ag-header-cell-filter-button").click()
+    header = page.locator(f".ag-header-cell[col-id={col_id}]")
+    header.locator(".ag-header-cell-filter-button").click()
     flt = page.locator(".ag-filter").first
     expect(flt).to_be_visible()
     flt.locator("input[type=text], input:not([type])").first.fill(text)
+    # the grid applies a text filter after a short debounce; an Escape pressed before that is lost while it
+    # re-renders, which showed up once the grid held more rows (a second run against the same database)
+    expect(header).to_have_class(re.compile(r"\bag-header-cell-filtered\b"))
     page.keyboard.press("Escape")
     expect(flt).to_be_hidden()
 
