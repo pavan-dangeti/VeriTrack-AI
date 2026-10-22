@@ -12,6 +12,7 @@ import signal
 import subprocess
 import sys
 import time
+import uuid
 from pathlib import Path
 
 import pytest
@@ -138,3 +139,45 @@ async def test_a_frozen_worker_that_wakes_up_late_changes_nothing(batch_id, tmp_
     assert await _state(batch_id) == finished   # not a row, status or counter changed
     assert finished["files"] == [("f1.csv", FileStatus.DONE, 1, 1), ("f2.csv", FileStatus.DONE, 2, 1),
                                  ("f3.csv", FileStatus.DONE, 1, 1)]
+
+
+async def test_a_resumed_worker_s_result_writes_affect_zero_rows(batch_id, monkeypatch):
+    """The result writes are single conditional UPDATEs on the lease token: once another worker has taken
+    the job over, the old worker's own statements match no row."""
+    from datetime import UTC, datetime, timedelta
+
+    from sqlalchemy import update
+
+    from app.services.batch_service import fenced_batch_update
+    from app.services.extraction.pipeline import _finish, claim_file
+
+    async with open_session() as db:
+        file_id = (await db.execute(select(UploadedFile.id).where(UploadedFile.batch_id == batch_id)
+                                    .order_by(UploadedFile.original_filename).limit(1))).scalar_one()
+        token_a = await claim_file(db, file_id)                       # worker A claims, then freezes
+        stale_batch_token = (await db.execute(update(UploadBatch).where(UploadBatch.id == batch_id)
+                             .values(status=BatchStatus.PROCESSING, lease_token=func.gen_random_uuid())
+                             .returning(UploadBatch.lease_token))).scalar_one()
+        await db.execute(update(UploadedFile).where(UploadedFile.id == file_id)   # A's lease runs out
+                         .values(lease_expires_at=datetime.now(UTC) - timedelta(seconds=1)))
+        await db.commit()
+        token_b = await claim_file(db, file_id)                       # worker B takes over
+        assert token_a and token_b and token_a != token_b
+        await db.execute(update(UploadBatch).where(UploadBatch.id == batch_id)
+                         .values(lease_token=func.gen_random_uuid()))   # and the batch
+        await db.commit()
+
+        before = await _state(batch_id)
+        # rows each statement changed (RETURNING lists them)
+        a_file = (await db.execute(_finish(file_id, token_a, status=FileStatus.DONE, rows_extracted=99))).all()
+        a_batch = (await db.execute(fenced_batch_update(uuid.UUID(batch_id), stale_batch_token,
+                                                        status=BatchStatus.COMPLETED, processed_files=99))).all()
+        assert (len(a_file), len(a_batch)) == (0, 0)
+        await db.commit()
+        assert await _state(batch_id) == before
+
+        # the holder's token is what makes the difference
+        b_file = (await db.execute(_finish(file_id, token_b, status=FileStatus.DONE, rows_extracted=1))).all()
+        assert len(b_file) == 1
+        await db.rollback()
+

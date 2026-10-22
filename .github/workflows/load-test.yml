@@ -14,15 +14,19 @@ on:
         description: HR users (browse continuously while OCR runs)
         type: number
         default: 40
+      ramp_seconds:
+        description: Spread the sign-ins over this many seconds (0 = all at once)
+        type: number
+        default: 0
 
 concurrency:
-  group: load-test-${{ github.ref }}
+  group: load-test-${{ github.ref }}-${{ inputs.ramp_seconds }}
   cancel-in-progress: true
 
 jobs:
   load:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 75
     services:
       postgres:
         image: postgres:16
@@ -75,10 +79,11 @@ jobs:
         env:
           MANAGERS: ${{ inputs.managers }}
           HR: ${{ inputs.hr }}
+          RAMP: ${{ inputs.ramp_seconds }}
         run: |
           echo "runner: $(nproc) vCPU, $(free -g | awk '/Mem:/ {print $2}') GB RAM, $(uname -m)"
           python -m scripts.load_test --base http://127.0.0.1:8000 --managers "$MANAGERS" --hr "$HR" \
-            --out load-report.json
+            --ramp-seconds "$RAMP" --out load-report.json
       - name: Summary
         if: always()
         run: |
@@ -91,7 +96,11 @@ jobs:
                 f"all results correct: {r['all_results_correct']}, isolated: {r['all_users_isolated']}\n\n"
                 f"workload: {r['workload']}\n\njobs: {r['jobs']}\n")
           print("| Requests | Count | p50 | p95 | p99 | max |\n|---|---|---|---|---|---|")
-          rows = [("all except logins and uploads", r["latency_overall"]), *r["latency"].items()]
+          w = r["latency_windows"]
+          rows = [("all except sign-ins and uploads", r["latency_overall"]),
+                  (f"... opening, until the last sign-in at {w['sign_in_window_s']} s", w["opening"]),
+                  ("... steady state after it", w["steady"]), *r["latency"].items()]
+          rows = [(n, v) for n, v in rows if v]
           for name, s in rows:
               print(f"| {name} | {s['count']} | {s['p50_ms']} ms | {s['p95_ms']} ms | {s['p99_ms']} ms | {s['max_ms']} ms |")
           EOF

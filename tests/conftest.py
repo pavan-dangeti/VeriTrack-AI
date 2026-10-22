@@ -22,7 +22,7 @@ from sqlalchemy import text
 from alembic import command
 from app.core.config import settings
 from app.core.rate_limit import limiter
-from app.db.session import engine
+from app.db.session import engine, job_engine
 
 # organizations cascades to every tenant table
 TABLES = ("organizations", "users", "audit_logs", "approved_m365_domains", "refresh_tokens")
@@ -77,6 +77,7 @@ async def clean_state():
 
     set_tenant(SYSTEM)
     await engine.dispose()  # drop pooled connections bound to a previous loop
+    await job_engine.dispose()
     limiter.reset()
     async with engine.begin() as conn:
         await conn.execute(

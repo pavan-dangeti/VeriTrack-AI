@@ -29,7 +29,7 @@ from app.core.config import settings
 from app.core.logging import configure_logging, get_logger
 from app.core.proxy import TrustedProxyMiddleware
 from app.core.rate_limit import limiter
-from app.db.session import engine
+from app.db.session import engine, job_engine
 
 log = get_logger("http")
 
@@ -137,6 +137,7 @@ async def lifespan(app: FastAPI):
         demo_task.cancel()
     await jobs.drain()
     await engine.dispose()
+    await job_engine.dispose()
 
 
 def create_app() -> FastAPI:

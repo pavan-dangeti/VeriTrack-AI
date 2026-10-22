@@ -44,12 +44,12 @@ def _spawn(coro, name: str) -> None:
 
 
 async def _process_batch_job(batch_id: str) -> dict:
-    from app.db.session import get_session_factory
+    from app.db.session import get_job_session_factory
     from app.services.batch_service import run_batch_processing
 
     try:
-        with tenant(await batch_org(get_session_factory(), batch_id)):
-            async with get_session_factory()() as db:
+        with tenant(await batch_org(get_job_session_factory(), batch_id)):
+            async with get_job_session_factory()() as db:
                 return await run_batch_processing(db, batch_id)
     except Exception as exc:  # noqa: BLE001 — a job must never kill the loop; the reaper retries it
         log.error("batch_job_failed", batch_id=batch_id, exc_info=exc)
@@ -57,13 +57,13 @@ async def _process_batch_job(batch_id: str) -> dict:
 
 
 async def _process_file_job(file_id) -> None:
-    from app.db.session import get_session_factory
+    from app.db.session import get_job_session_factory
     from app.models.uploads import UploadedFile
     from app.services.extraction.pipeline import process_uploaded_file
 
     try:
-        with tenant(await _org_of(get_session_factory(), UploadedFile, file_id)):
-            async with get_session_factory()() as db:
+        with tenant(await _org_of(get_job_session_factory(), UploadedFile, file_id)):
+            async with get_job_session_factory()() as db:
                 await process_uploaded_file(db, file_id)
     except Exception as exc:  # noqa: BLE001
         log.error("file_job_failed", file_id=str(file_id), exc_info=exc)
@@ -82,11 +82,11 @@ async def dispatch_batch(batch_id: str) -> None:
 
 
 async def _analysis_job(batch_id: str, triggered_by, run_id: str | None = None) -> dict:
-    from app.db.session import get_session_factory
+    from app.db.session import get_job_session_factory
     from app.services.analyze_service import execute_analysis
 
-    with tenant(await batch_org(get_session_factory(), batch_id)):
-        async with get_session_factory()() as db:
+    with tenant(await batch_org(get_job_session_factory(), batch_id)):
+        async with get_job_session_factory()() as db:
             return await execute_analysis(db, batch_id, triggered_by=triggered_by, run_id=run_id)
 
 
@@ -116,12 +116,12 @@ async def reap() -> dict:
     """Re-dispatches every job whose worker is gone: batches whose lease ran out, batches queued for longer
     than a lease (their dispatch was lost), and files whose lease ran out outside a running batch (an
     interrupted reprocess request). Returns how many of each."""
-    from app.db.session import get_session_factory
+    from app.db.session import get_job_session_factory
     from app.models.uploads import BatchStatus, UploadBatch, UploadedFile
     from app.services import leases
 
     with tenant(SYSTEM):  # every organisation's jobs
-        async with get_session_factory()() as db:
+        async with get_job_session_factory()() as db:
             batches = list((await db.execute(select(UploadBatch.id).where(or_(
                 leases.lapsed(UploadBatch),
                 (UploadBatch.status == BatchStatus.QUEUED) & (UploadBatch.created_at < func.now() - leases.length()),
@@ -153,12 +153,12 @@ async def recover_interrupted_analyses(stale_after: timedelta = timedelta(minute
     cleared by execute_analysis before it starts again)."""
     if settings.processing_mode != "background":
         return 0
-    from app.db.session import get_session_factory
+    from app.db.session import get_job_session_factory
     from app.models.analysis import AnalysisRun, AnalysisStatus
 
     cutoff = datetime.now(UTC) - stale_after
     with tenant(SYSTEM):  # every organisation's runs
-        async with get_session_factory()() as db:
+        async with get_job_session_factory()() as db:
             stuck = (await db.execute(
                 select(AnalysisRun.id, AnalysisRun.batch_id, AnalysisRun.triggered_by).where(
                     AnalysisRun.status == AnalysisStatus.RUNNING, AnalysisRun.started_at < cutoff

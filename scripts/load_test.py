@@ -51,6 +51,8 @@ LEAVE_CSV = (
 
 
 HR_THINK_S = 5.0   # a person reading a page before opening the next
+# deliberately slow (bcrypt) or bounded by the upload itself; reported on their own
+SLOW_BY_DESIGN = ("login", "create_user", "upload_repo", "upload_leaves", "upload_timesheets")
 
 
 def poll_delay(age_s: float) -> float:
@@ -61,10 +63,19 @@ def poll_delay(age_s: float) -> float:
 class Stats:
     def __init__(self) -> None:
         self.latency: dict[str, list[float]] = {}
+        self.samples: list[tuple[str, float, float]] = []   # (request kind, when it finished, ms)
         self.errors: list[str] = []
+        self.last_sign_in = 0.0   # when the last user's sign-in finished
+        self.transport_retries = 0   # GETs retried after a dropped connection
 
     def add(self, name: str, seconds: float) -> None:
         self.latency.setdefault(name, []).append(seconds * 1000)
+        self.samples.append((name, time.perf_counter(), seconds * 1000))
+
+    def reset(self) -> None:
+        """Forget the setup's requests (creating the accounts)."""
+        self.latency.clear()
+        self.samples.clear()
 
     @staticmethod
     def _percentiles(xs: list[float]) -> dict:
@@ -79,9 +90,11 @@ class Stats:
     def summary(self) -> dict:
         return {name: self._percentiles(xs) for name, xs in sorted(self.latency.items())}
 
-    def overall(self, exclude: tuple[str, ...]) -> dict:
-        """Every request except the named kinds (logins and uploads, which are deliberately slow)."""
-        return self._percentiles([x for name, xs in self.latency.items() if name not in exclude for x in xs])
+    def overall(self, exclude: tuple[str, ...], start: float = 0.0, end: float = float("inf")) -> dict | None:
+        """Every request finished in [start, end) except the named kinds (sign-ins and uploads, which are
+        deliberately slow); None if there were none."""
+        xs = [ms for name, t, ms in self.samples if name not in exclude and start <= t < end]
+        return self._percentiles(xs) if xs else None
 
 
 class FlowError(Exception):
@@ -107,7 +120,14 @@ class User:
     async def _timed(self, name: str, method: str, url: str, **kw) -> httpx.Response:
         t = time.perf_counter()
         try:
-            r = await self.http.request(method, url, **kw)
+            try:
+                r = await self.http.request(method, url, **kw)
+            except httpx.TransportError:
+                if method != "GET":
+                    raise
+                # a dropped connection: retried once, as the frontend does (retry: 1 in frontend/src/App.tsx)
+                self.stats.transport_retries += 1
+                r = await self.http.request(method, url, **kw)
         except httpx.HTTPError as exc:
             self.stats.errors.append(f"{name}: {type(exc).__name__}")
             raise FlowError(name) from exc
@@ -129,6 +149,7 @@ class User:
     async def login(self, email: str, password: str) -> None:
         r = await self.call("login", "POST", "/api/v1/auth/login", json={"email": email, "password": password})
         self.http.headers["Authorization"] = f"Bearer {r.json()['access_token']}"
+        self.stats.last_sign_in = max(self.stats.last_sign_in, time.perf_counter())
 
 
 async def create_accounts(base: str, stats: Stats, managers: int, hr: int, tag: str):
@@ -151,7 +172,9 @@ async def create_accounts(base: str, stats: Stats, managers: int, hr: int, tag: 
     return accounts
 
 
-async def manager_flow(base: str, stats: Stats, email: str, password: str, i: int, results: dict) -> None:
+async def manager_flow(base: str, stats: Stats, email: str, password: str, i: int, results: dict,
+                       delay: float = 0.0) -> None:
+    await asyncio.sleep(delay)   # a ramped run spreads the sign-ins out
     try:
         await _manager_flow(base, stats, email, password, i, results)
     except FlowError as exc:
@@ -198,7 +221,9 @@ async def _manager_flow(base: str, stats: Stats, email: str, password: str, i: i
     await u.http.aclose()
 
 
-async def hr_browse(base: str, stats: Stats, email: str, password: str, i: int, stop: asyncio.Event) -> None:
+async def hr_browse(base: str, stats: Stats, email: str, password: str, i: int, stop: asyncio.Event,
+                    delay: float = 0.0) -> None:
+    await asyncio.sleep(delay)
     u = User(base, f"203.0.113.{i + 1}", stats)
     try:
         await u.login(email, password)
@@ -256,7 +281,9 @@ async def main() -> int:
     ap.add_argument("--hr", type=int, default=10)
     ap.add_argument("--out", default=None)
     ap.add_argument("--metrics-token", default=os.environ.get("METRICS_TOKEN"))
-    ap.add_argument("--max-minutes", type=float, default=30)
+    ap.add_argument("--max-minutes", type=float, default=40)
+    ap.add_argument("--ramp-seconds", type=float, default=0,
+                    help="spread the sign-ins evenly over this many seconds (0: all at once)")
     args = ap.parse_args()
 
     from scripts.gen_synthetic_timesheets import generate
@@ -267,14 +294,17 @@ async def main() -> int:
     stats = Stats()
     tag = str(int(time.time()))
     accounts = await create_accounts(args.base, stats, args.managers, args.hr, tag)
-    stats.latency.pop("login", None)
+    stats.reset()
 
     results: dict = {}
     stop = asyncio.Event()
     started = time.perf_counter()
-    browsers = [asyncio.create_task(hr_browse(args.base, stats, e, p, i, stop))
+    def delay(i: int, of: int) -> float:   # each role spread evenly across the ramp
+        return args.ramp_seconds * i / of if of else 0.0
+
+    browsers = [asyncio.create_task(hr_browse(args.base, stats, e, p, i, stop, delay(i, args.hr)))
                 for role, e, p, i in accounts if role == "HR"]
-    flows = {asyncio.create_task(manager_flow(args.base, stats, e, p, i, results)): e
+    flows = {asyncio.create_task(manager_flow(args.base, stats, e, p, i, results, delay(i, args.managers))): e
              for role, e, p, i in accounts if role == "MANAGER"}
     _, unfinished = await asyncio.wait(flows, timeout=args.max_minutes * 60)
     for task in unfinished:
@@ -288,7 +318,8 @@ async def main() -> int:
 
     report = {
         "users": {"managers": args.managers, "hr": args.hr, "total": args.managers + args.hr},
-        "workload": {"hr_think_s": HR_THINK_S, "poll": "1.5 s, slowing to 10 s as the upload ages",
+        "workload": {"sign_in": f"spread over {args.ramp_seconds:g} s" if args.ramp_seconds else "all at once",
+                     "hr_think_s": HR_THINK_S, "poll": "1.5 s, slowing to 10 s as the upload ages",
                      "max_minutes": args.max_minutes},
         "timed_out": len(unfinished),
         "client_cpus": os.cpu_count(),
@@ -304,8 +335,14 @@ async def main() -> int:
         },
         "errors": stats.errors[:20],
         "error_count": len(stats.errors),
-        "latency_overall": stats.overall(exclude=("login", "create_user", "upload_repo", "upload_leaves",
-                                                  "upload_timesheets")),
+        "transport_retries": stats.transport_retries,
+        "latency_overall": stats.overall(exclude=SLOW_BY_DESIGN),
+        # the opening window ends when the last user has signed in
+        "latency_windows": {
+            "sign_in_window_s": round(stats.last_sign_in - started, 1),
+            "opening": stats.overall(SLOW_BY_DESIGN, end=stats.last_sign_in),
+            "steady": stats.overall(SLOW_BY_DESIGN, start=stats.last_sign_in),
+        },
         "latency": stats.summary(),
         "jobs": jobs,
         "wrong": {e: r for e, r in results.items() if not (r["correct"] and r["isolated"])},
