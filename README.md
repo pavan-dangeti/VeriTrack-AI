@@ -57,7 +57,7 @@ involved.
 | **Sheet review** | The reconstructed, colour-coded grid (optionally side by side with the uploaded screenshot) and the list of verification checks. |
 | **Employee repository** | Versioned master data with inline correction and full history; OCR'd scans of employee lists are supported too. |
 | **Built for teams** | Four roles with enforced scoping, audit log of every security-relevant action, analytics per manager. |
-| **Holds up under load** | OCR runs off the request path with bounded concurrency; with 200 concurrent users on 2 vCPUs, API requests p50 28 ms and p95 181 ms while OCR keeps the CPU busy, every file processed exactly once. |
+| **Holds up under load** | OCR runs off the request path with bounded concurrency; with 200 concurrent users on 2 vCPUs, once everyone has signed in, API requests take 26–29 ms at p50 while OCR keeps the CPU busy, and every file is processed exactly once. |
 | **Polished UI** | Light/dark themes, command palette (`Ctrl/⌘ K`), collapsible sidebar, mobile layout, live progress, accessible components. |
 
 ## Screenshots
@@ -175,7 +175,7 @@ OCR suites use synthetic sheets with invented people and projects, rendered on d
 
 | Suite | What it proves | Result |
 |---|---|---|
-| **Backend** (`pytest tests`) | API, auth, rules, OCR, concurrency, recovery, exports, migrations | **378 passed** |
+| **Backend** (`pytest tests`) | API, auth, rules, OCR, concurrency, recovery, exports, migrations | **379 passed** |
 | &nbsp;&nbsp;OCR regression | 16 synthetic sheets (28–31-day months, 1–9 projects, 4 fonts, 90–150 % zoom) read field-for-field | **16/16 exact** |
 | &nbsp;&nbsp;Capture conditions | 4 sheets × 7 degradations (80–200 % zoom, JPEG q60, blur, noise): every hour, total, status, ID and period | **28/28 exact** |
 | &nbsp;&nbsp;Hostile inputs | cropped totals, cut-off columns, rotation, grayscale, tiny, padded: exact *or* flagged — never verified-and-wrong | **7/7** |
@@ -185,7 +185,7 @@ OCR suites use synthetic sheets with invented people and projects, rendered on d
 | &nbsp;&nbsp;Organisation isolation (`pytest tests/test_tenant_isolation.py`) | another organisation's 4 roles against every route that takes an id, list, export and write; row-level security per table with raw SQL; passes logged in as a superuser too | **0 leaks** |
 | **Frontend** (`npm test`) | pages, guards, flows, shell | **59 passed** |
 | **End-to-end** (`pytest e2e`, real Chromium) | every page and button for all four roles, uploads, downloads, dark mode, palette, mobile, negative paths; fails on any console error or 5xx | **48 passed**, stable across consecutive runs, also against the production build |
-| **Load** (`gh workflow run load-test.yml`, 2 vCPU x86-64 runner) | 200 concurrent users: 160 managers upload → OCR → analyse while 40 HR users browse | **160/160 results correct, 0 errors, 0 cross-user leaks; 480/480 files processed exactly once** |
+| **Load** (`gh workflow run load-test.yml`, 2 vCPU x86-64 runner) | 200 concurrent users, sign-ins all at once and spread over 60 s: 160 managers upload → OCR → analyse while 40 HR users browse | **both runs: 160/160 results correct, 0 errors, 0 cross-user leaks; 480/480 files processed exactly once** |
 
 ### OCR benchmark
 
@@ -206,36 +206,43 @@ wrong, at a median 17.9 s per sheet against RapidOCR's 5.8 s (`-f engine=tessera
 
 ### Load test
 
-`gh workflow run load-test.yml` ([`.github/workflows/load-test.yml`](.github/workflows/load-test.yml),
-[`scripts/load_test.py`](scripts/load_test.py)): PostgreSQL, the API (one web worker, background processing,
-RapidOCR, `OCR_CONCURRENCY=2`) and the load generator on one GitHub-hosted runner, 2 vCPU, 7 GB, x86-64, with
-`ENVIRONMENT=staging` because the runner's database has no TLS. 200 users sign in in the same second; each of
-160 managers uploads an employee repository, a leave register and a timesheet screenshot, polls for OCR the
-way the frontend does (every 1.5 s, slowing to every 10 s as the upload ages), runs the analysis and checks
-it; 40 HR users browse throughout, one page every 5 s. The run took 29 min.
+`gh workflow run load-test.yml -f ramp_seconds=0` and `-f ramp_seconds=60`
+([`.github/workflows/load-test.yml`](.github/workflows/load-test.yml), [`scripts/load_test.py`](scripts/load_test.py)):
+PostgreSQL, the API (one web worker, background processing, RapidOCR, `OCR_CONCURRENCY=2`) and the load
+generator on one GitHub-hosted runner, 2 vCPU, 7 GB, x86-64, with `ENVIRONMENT=staging` because the runner's
+database has no TLS. 200 users sign in, all at once or spread evenly over 60 s; each of 160 managers uploads an
+employee repository, a leave register and a timesheet screenshot, polls for OCR the way the frontend does
+(every 1.5 s, slowing to every 10 s as the upload ages), runs the analysis and checks it; 40 HR users browse
+throughout, one page every 5 s. Latency is reported in two windows: the opening one, until the last user has
+signed in, and steady state after it. bcrypt runs at cost 12 in both.
 
-| Requests | Count | p50 | p95 | p99 |
-|---|---|---|---|---|
-| **All requests except sign-in and uploads** | 30 101 | **28 ms** | **181 ms** | **4.0 s** |
-| Batch status polling | 15 519 | 29 ms | 462 ms | 5.5 s |
-| Dashboard and lists (HR) | 13 694 | 26–31 ms | 108–127 ms | 1.7–2.6 s |
-| Analysis trigger and result | 478 | 29 ms | 70–76 ms | 118–128 ms |
-| Upload (stored and queued) | 480 | 1.5–1.6 s | 8.7–9.8 s | 12–21 s |
-| Sign-in, 200 users in the same second | 200 | 31 s | 65 s | 70 s |
+| Requests, except sign-in and uploads | Sign-ins all at once (run 39754076536) | Spread over 60 s (run 39754080742) |
+|---|---|---|
+| **Steady state**, p50 · p95 · p99 | **29 ms · 472 ms · 1.2 s** (31 689 requests) | **26 ms · 139 ms · 685 ms** (30 529) |
+| Opening window, p50 · p95 · p99 | 1.9 s · 11.7 s · 20.9 s (935; last sign-in at 75 s) | 1.9 s · 8.0 s · 12.0 s (1 174; last sign-in at 85 s) |
+| **Sign-in**, p50 · p95 · p99 | 32.6 s · 65.6 s · 70.8 s | 11.6 s · 24.2 s · 27.2 s |
+| Upload (stored and queued), p50 · p95 · p99 | 2.0–2.3 s · 9.0–10.8 s · 12.6–16.9 s | 1.9–2.0 s · 6.1–7.0 s · 9.2–11.9 s |
+| A manager's wait for OCR, median · last | 17.4 min · 30.9 min | 16.5 min · 29.5 min |
+| Correct, isolated, errors | 160/160 · yes · 0 | 160/160 · yes · 0 (1 GET retried after a dropped connection, as the frontend retries once) |
+| From `/metrics` | 480 files claimed once and finished once, no takeovers, nothing discarded | same |
 
-Every result was correct and no user saw another's data; from `/metrics`, all 480 files were claimed once and
-finished once, with no takeovers and no discarded results. Where it is slow, as measured:
+Where it is slow, as measured:
 
-- **The first minutes.** 200 bcrypt sign-ins (cost 12) and 480 uploads arrive together on 2 vCPUs: sign-in
-  takes 31 s at the median, and the p99 of every other request (4 s) comes from this burst.
-- **OCR throughput.** 160 timesheets on two OCR threads: a manager waited 16 min for their sheet at the
-  median, 28 min for the last one. Capacity grows with CPUs and `OCR_CONCURRENCY`, or with Celery workers.
+- **Signing in.** bcrypt (cost 12) on 2 vCPUs: 200 sign-ins at once take 33 s at the median; spread over a
+  minute, 12 s. The opening window's request latency comes from this burst and the uploads arriving with it.
+- **OCR throughput.** 160 timesheets on two OCR threads: the median manager waits 16–17 min, the last ~30.
+  Capacity grows with CPUs and `OCR_CONCURRENCY`, or with Celery workers. Run time varies between runners of
+  the same size: one earlier all-at-once run finished in 8 min, with a median OCR wait of 4 min.
 - **An earlier run starved.** With HR users opening four pages every half second and the frontend polling at
   a fixed 1.5 s, the API served ~90 requests a second and OCR, which runs at a lower priority, got almost no
   CPU: 58 of 160 sheets were unfinished after 48 minutes. Polling now backs off, and the HR users browse at
-  a person's pace. Load-test runs also found three bugs, each fixed with a test that failed before: database
-  connections held through bcrypt and through storage, report and export work (pool timeouts, HTTP 500), and
-  bcrypt sharing the default thread pool with storage I/O.
+  a person's pace.
+
+Load-test runs found these bugs, each fixed with a test that failed before or with the run that showed it:
+database connections held through bcrypt and through storage, report and export work (pool timeouts, HTTP
+500); bcrypt sharing the default thread pool with storage I/O; background jobs sharing the request pool, so a
+burst of uploads starved requests (now a pool of their own); and a job's wait for a connection recorded as the
+file's failure (jobs now wait up to `JOB_DB_POOL_TIMEOUT`).
 
 ## Getting started
 
@@ -275,6 +282,7 @@ All settings are environment variables (see [`.env.example`](.env.example)); pro
 | `OCR_CONCURRENCY` | sheets read in parallel per API process (≈ CPU cores) |
 | `JOB_LEASE_SECONDS` | how long a worker's claim on a job lasts without renewal (120); a dead worker's job is taken over after it |
 | `JOB_MAX_ATTEMPTS` | a file interrupted this many times in a row is failed instead of retried (3) |
+| `JOB_DB_POOL_SIZE` · `JOB_DB_POOL_TIMEOUT` | background jobs' own connection pool (5, plus 5 overflow) and how long a job waits for a connection (300 s) |
 | `METRICS_TOKEN` | turns on `GET /metrics` (Prometheus) for bearers of this token; unset, the endpoint does not exist |
 | `TRUSTED_PROXY_HOPS` | proxies in front of the API (`2` for Vercel → Render) — used for rate limits and the audit log |
 | `STORAGE_BACKEND` | `local` · `volume` (persistent disk) · `s3` |
