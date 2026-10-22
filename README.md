@@ -184,7 +184,7 @@ OCR suites use synthetic sheets with invented people and projects, rendered on d
 | &nbsp;&nbsp;Audit log tampering (`pytest tests/test_audit_chain.py`) | edited, re-hashed, deleted, reordered and forged entries made directly in the database; truncated and fully rewritten chains against a recorded head; 40 concurrent writers; the migration's backfill | **every change caught** at the entry where it was made, except what the [threat model](docs/threat-model.md) lists |
 | &nbsp;&nbsp;Organisation isolation (`pytest tests/test_tenant_isolation.py`) | another organisation's 4 roles against every route that takes an id, list, export and write; row-level security per table with raw SQL; passes logged in as a superuser too | **0 leaks** |
 | **Frontend** (`npm test`) | pages, guards, flows, shell | **59 passed** |
-| **End-to-end** (`pytest e2e`, real Chromium) | every page and button for all four roles, uploads, downloads, dark mode, palette, mobile, negative paths; fails on any console error or 5xx | **48 passed**, stable across consecutive runs, also against the production build |
+| **End-to-end** (`pytest e2e`, real Chromium) | every page and button for all four roles, uploads, downloads, dark mode, palette, mobile, negative paths; fails on any console error or 5xx | **48 passed** against the production build (`npm run build && npx vite preview`), on a fresh database and on two further runs against the same one |
 | **Load** (`gh workflow run load-test.yml`, 2 vCPU x86-64 runner) | 200 concurrent users, sign-ins all at once and spread over 60 s: 160 managers upload → OCR → analyse while 40 HR users browse | **both runs: 160/160 results correct, 0 errors, 0 cross-user leaks; 480/480 files processed exactly once** |
 
 ### OCR benchmark
@@ -384,8 +384,8 @@ docs/                 design doc, threat model, deployment guide, OCR benchmark,
   x86-64 and 94 on an ARM Mac; two errors appeared only on x86-64 ('M ig ration' for *Migration*, 'office' for
   a wrapped *Out Of Office*) and were fixed. Published numbers come from x86-64 CI runs.
 - Pen marks that are not data (ticks, circles) also send a sheet to review.
-- Processing a batch is sequential per batch (fair across managers); a single very large batch takes
-  ~6–10 s per sheet per OCR slot.
+- A batch's files are read one at a time (fair across managers); a sheet takes 5.8 s at the median on a
+  GitHub-hosted x86-64 runner ([OCR benchmark](docs/ocr-benchmark.md)), so a large batch takes minutes.
 - **Organisations are created by the operator** (CLI), not by self-service sign-up, and a user belongs to one
   organisation. E-mail addresses are unique across organisations, since they are the sign-in identity, so
   creating a user with an address another organisation uses is refused, which reveals that it exists. Likewise
