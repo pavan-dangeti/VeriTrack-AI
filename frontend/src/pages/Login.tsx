@@ -103,7 +103,7 @@ export function LoginPage() {
             ))}
           </ul>
         </div>
-        <p className="relative text-xs text-slate-500">© {new Date().getFullYear()} VeriTrack AI · Enterprise compliance platform</p>
+        <p className="relative text-xs text-slate-500">© {new Date().getFullYear()} VeriTrack AI · a personal project · synthetic data only</p>
       </aside>
 
       <main className="flex items-center justify-center p-6">
