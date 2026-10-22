@@ -87,9 +87,8 @@ def test_every_route_has_a_cross_organisation_check():
 async def _org_b(client) -> dict:
     from app.cli import create_organization
 
-    rc, password = await create_organization("Beta Org", "admin@beta.example")
-    assert rc == 0 and password
-    ma = await login(client, "admin@beta.example", password)
+    assert await create_organization("Beta Org", "admin@beta.example", "Beta-Org-pass1") == 0
+    ma = await login(client, "admin@beta.example", "Beta-Org-pass1")
     _, ex = await create_user(client, ma, "b.exec@beta.example", EX)
     _, mg = await create_user(client, ma, "b.mgr@beta.example", MG)
     _, hr = await create_user(client, mg, "b.hr@beta.example", HR)

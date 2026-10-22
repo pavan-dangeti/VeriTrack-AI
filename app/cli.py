@@ -1,18 +1,23 @@
 """Bootstrap CLI. The Master Admin is the only account seeded outside the API.
 
     python -m app.cli sync-master-admin       # create or update it from ADMIN_EMAIL / ADMIN_PASSWORD
-    python -m app.cli create-master-admin [--email X --password Y] [--if-not-exists]
+    python -m app.cli create-master-admin [--email X] [--if-not-exists]   # password: ADMIN_PASSWORD or prompt
     python -m app.cli approve-domain <domain> [--creator-email X]
-    python -m app.cli create-organization <name> --admin-email X   # a new tenant and its Master Admin
+    python -m app.cli create-organization <name> --admin-email X   # password: ORG_ADMIN_PASSWORD or prompt
     python -m app.cli verify-audit-log [--expect-head ORG:SEQ:HASH ...]  # exit 1 if any audit chain is broken
 
 ADMIN_EMAIL administers the bootstrap organisation (the oldest one, created on first start). Every command
 runs as a trusted internal step that can see all organisations (app/db/tenant.py) and names the organisation
 of each row it writes.
+
+A new account's password comes from an environment variable or, in a terminal, a hidden prompt asked twice.
+It is never a command-line argument (shell history, process lists) and is never printed or logged.
 """
 
 import argparse
 import asyncio
+import getpass
+import os
 import sys
 import uuid
 
@@ -172,27 +177,41 @@ async def _approve_domain(db, domain_norm: str, creator_email: str) -> int:
     return 0
 
 
-async def create_organization(name: str, admin_email: str) -> tuple[int, str | None]:
-    """A new tenant and its Master Admin, with a generated password. Returns (exit code, password)."""
+async def create_organization(name: str, admin_email: str, password: str) -> int:
+    """A new tenant and its Master Admin. Returns the exit code."""
     from sqlalchemy.exc import IntegrityError
 
-    from app.core.security import generate_initial_password
-
-    password = generate_initial_password()
     with tenant(SYSTEM):
         async with get_session_factory()() as db:
             try:
                 org = await org_service.create(db, name)
             except IntegrityError:
                 print(f"ERROR: an organisation named {name.strip()!r} already exists", file=sys.stderr)
-                return 1, None
+                return 1
             rc, created = await _create_master_admin(db, admin_email, password, False, org.id)
             if not created:
                 await db.delete(org)
                 await db.commit()
-                return rc or 1, None
+                return rc or 1
     print(f"Organisation created: {name.strip()} ({org.id})")
-    return 0, password
+    return 0
+
+
+def read_password(env_var: str, value: str | None) -> str | None:
+    """A new account's password: `value` (read from env_var), else a hidden prompt asked twice. None, with
+    the reason on stderr, when there is no password to use. Never printed or logged."""
+    if not value:
+        if not sys.stdin.isatty():
+            print(f"ERROR: set {env_var}, or run this in a terminal to be asked for the password", file=sys.stderr)
+            return None
+        value = getpass.getpass("Password: ")
+        if value != getpass.getpass("Repeat the password: "):
+            print("ERROR: the passwords do not match", file=sys.stderr)
+            return None
+    if not 8 <= len(value) <= 72:   # the sign-in form's limits; bcrypt reads at most 72 bytes
+        print("ERROR: the password must be 8 to 72 characters", file=sys.stderr)
+        return None
+    return value
 
 
 def _parse_head(value: str) -> tuple[uuid.UUID | None, tuple[int, str]]:
@@ -229,7 +248,6 @@ def main() -> int:
 
     p_admin = sub.add_parser("create-master-admin")
     p_admin.add_argument("--email", default=settings.admin_email)
-    p_admin.add_argument("--password", default=settings.admin_password)
     p_admin.add_argument("--if-not-exists", action="store_true")
 
     p_domain = sub.add_parser("approve-domain")
@@ -264,30 +282,20 @@ def main() -> int:
         print("Demo account synced" if user else "DEMO_EMAIL / DEMO_PASSWORD not set — no demo account")
         return 0
     if args.command == "create-master-admin":
-        generated = args.password is None
-        if generated:
-            # No --password flag and no ADMIN_PASSWORD env: generate a
-            # strong random password and print it once (never stored/logged).
-            from app.core.security import generate_initial_password
-
-            password = generate_initial_password()
-        else:
-            password = args.password
-        rc, created = asyncio.run(
-            create_master_admin(args.email, password, args.if_not_exists)
-        )
-        if generated and created:
-            print(f"Generated Master Admin password (shown once): {password}")
+        password = read_password("ADMIN_PASSWORD", settings.admin_password)
+        if password is None:
+            return 2
+        rc, _ = asyncio.run(create_master_admin(args.email, password, args.if_not_exists))
         return rc
     if args.command == "approve-domain":
         return asyncio.run(approve_domain(args.domain, args.creator_email))
     if args.command == "verify-audit-log":
         return asyncio.run(verify_audit_log(args.expect_head))
     if args.command == "create-organization":
-        rc, org_password = asyncio.run(create_organization(args.name, args.admin_email))
-        if org_password:
-            print(f"Master Admin {args.admin_email.strip().lower()}, password (shown once): {org_password}")
-        return rc
+        password = read_password("ORG_ADMIN_PASSWORD", os.environ.get("ORG_ADMIN_PASSWORD"))
+        if password is None:
+            return 2
+        return asyncio.run(create_organization(args.name, args.admin_email, password))
     return 2
 
 

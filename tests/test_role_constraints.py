@@ -71,8 +71,7 @@ class TestMasterAdminUniqueness:
     async def test_each_organisation_has_its_own_master_admin(self, ma_user_id):
         from app.cli import create_organization
 
-        rc, password = await create_organization("Second Co", "admin@second.example")
-        assert rc == 0 and password
+        assert await create_organization("Second Co", "admin@second.example", "Second-Co-pass1") == 0
 
 
 class TestHierarchyTriggers:
