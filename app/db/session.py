@@ -31,6 +31,7 @@ def get_session_factory() -> async_sessionmaker[AsyncSession]:
 # every connection requests need. With their own pool they can only queue behind each other.
 job_engine = create_async_engine(settings.database_url, **{
     **_engine_kwargs(), "pool_size": settings.job_db_pool_size, "max_overflow": settings.job_db_max_overflow,
+    "pool_timeout": settings.job_db_pool_timeout,
 })
 _job_session_factory: async_sessionmaker[AsyncSession] = async_sessionmaker(job_engine, expire_on_commit=False)
 
