@@ -15,6 +15,7 @@ the sheet's own totals, and flags any leave day on a timesheet that is missing f
 ![React](https://img.shields.io/badge/React-19-20232A?style=flat-square&logo=react&logoColor=61DAFB)
 ![TypeScript](https://img.shields.io/badge/TypeScript-6-3178C6?style=flat-square&logo=typescript&logoColor=white)
 [![CI](https://github.com/pavan-dangeti/VeriTrack-AI/actions/workflows/ci.yml/badge.svg)](https://github.com/pavan-dangeti/VeriTrack-AI/actions/workflows/ci.yml)
+[![Security (incl. CodeQL)](https://img.shields.io/github/actions/workflow/status/pavan-dangeti/VeriTrack-AI/security.yml?branch=main&label=Security%20(incl.%20CodeQL)&style=flat-square)](https://github.com/pavan-dangeti/VeriTrack-AI/actions/workflows/security.yml?query=branch%3Amain)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
 [![Live demo](https://img.shields.io/badge/live%20demo-veritrack--nine.vercel.app-4f46e5?style=flat-square)](https://veritrack-nine.vercel.app)
 
