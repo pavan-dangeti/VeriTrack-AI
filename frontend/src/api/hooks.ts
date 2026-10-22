@@ -6,14 +6,29 @@ export type { Employee } from "./endpoints";
 
 const inFlight = (s?: string) => s === "PROCESSING" || s === "QUEUED";
 
+/**
+ * How often to poll while work is in flight: every 1.5 s at first, slowing as the newest in-flight item ages,
+ * to every 10 s once it has waited a minute. At a fixed 1.5 s, hundreds of open pages polling were most of
+ * the API's load in the 200-user load test, and starved the OCR they were waiting for.
+ */
+export function pollDelay(createdAt: (string | null | undefined)[], now = Date.now()): number {
+  const ages = createdAt.filter((c): c is string => !!c).map((c) => now - Date.parse(c));
+  const age = ages.length ? Math.min(...ages) : 0;
+  return Math.min(10_000, Math.max(1_500, Math.round(age / 6)));
+}
+
+const inFlightDelay = (batches: Batch[]) => {
+  const moving = batches.filter((b) => inFlight(b.status));
+  return moving.length ? pollDelay(moving.map((b) => b.created_at)) : false;
+};
+
 export function useBatches(kind?: string) {
   return useQuery({
     queryKey: ["batches", kind],
     queryFn: () => endpoints.batches(kind),
     staleTime: 5_000,
     refetchInterval: (query) => {
-      const data = query.state.data as Batch[] | undefined;
-      return data?.some((b) => inFlight(b.status)) ? 2000 : false;
+      return inFlightDelay((query.state.data as Batch[] | undefined) ?? []);
     },
   });
 }
@@ -26,7 +41,7 @@ export function useBatchDetail(batchId: string | null) {
     refetchInterval: (query) => {
       const d = query.state.data as Batch | undefined;
       const moving = inFlight(d?.status) || d?.files?.some((f) => inFlight(f.status));
-      return moving ? 1500 : false;
+      return moving && d ? pollDelay([d.created_at]) : false;
     },
   });
 }
@@ -87,8 +102,7 @@ export function useBatchCompletionWatcher(onCompletion: (e: BatchCompletionEvent
       return batches;
     },
     refetchInterval: (query) => {
-      const data = query.state.data as Batch[] | undefined;
-      return data?.some((b) => inFlight(b.status)) ? 2500 : 15_000;
+      return inFlightDelay((query.state.data as Batch[] | undefined) ?? []) || 15_000;
     },
   });
 }

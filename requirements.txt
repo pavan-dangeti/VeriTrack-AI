@@ -11,6 +11,7 @@ bcrypt>=5.0
 PyJWT[crypto]>=2.10
 httpx>=0.28
 structlog>=25.4
+prometheus-client>=0.21
 slowapi>=0.1.9
 python-multipart>=0.0.20
 

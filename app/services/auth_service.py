@@ -1,4 +1,3 @@
-import asyncio
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -15,6 +14,7 @@ from app.core.security import (
     decode_token,
     hash_password,
     hash_refresh_token,
+    run_bcrypt,
     verify_password,
 )
 from app.models.refresh_token import RefreshToken
@@ -77,10 +77,12 @@ async def authenticate_password(
     """
     now = datetime.now(UTC)
     user = await get_user_by_email(db, email)
+    # end the transaction: bcrypt below takes seconds under load, and must not hold a pooled connection
+    await db.commit()
 
     if user is None:
         # Burn comparable CPU time to blunt timing-based user enumeration.
-        await asyncio.to_thread(hash_password, "timing-equalizer-dummy-password")
+        await run_bcrypt(hash_password, "timing-equalizer-dummy-password")
         await audit_service.record(
             db,
             action=audit_service.ACTION_LOGIN,
@@ -108,7 +110,7 @@ async def authenticate_password(
     # Verify FIRST: a correct password always authenticates, even while locked,
     # so an attacker can neither DoS the owner out of their account nor detect
     # lockout state (there is no lockout-specific response).
-    password_ok = user.auth_type is AuthType.PASSWORD and await asyncio.to_thread(
+    password_ok = user.auth_type is AuthType.PASSWORD and await run_bcrypt(
         verify_password, password, user.password_hash or ""
     )
 

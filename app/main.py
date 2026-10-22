@@ -24,6 +24,7 @@ from app.api.routers import (
     uploads,
     users,
 )
+from app.core import metrics
 from app.core.config import settings
 from app.core.logging import configure_logging, get_logger
 from app.core.proxy import TrustedProxyMiddleware
@@ -112,10 +113,15 @@ async def lifespan(app: FastAPI):
 
         asyncio.get_running_loop().run_in_executor(None, warm_up_ocr)
     try:
-        await jobs.recover_interrupted_batches()
         await jobs.recover_interrupted_analyses()
     except Exception as exc:  # noqa: BLE001 — DB may be migrating; not fatal
         log.warning("recovery_skipped", error=str(exc)[:200])
+    reaper = None
+    if settings.processing_mode != "inline":
+        import asyncio
+
+        # finishes jobs whose worker died, now and every half lease
+        reaper = asyncio.get_running_loop().create_task(jobs.run_reaper(), name="job-reaper")
     demo_task = None
     if settings.processing_mode == "background":
         import asyncio
@@ -125,6 +131,8 @@ async def lifespan(app: FastAPI):
         if demo_service.enabled():
             demo_task = asyncio.get_running_loop().create_task(demo_service.run_scheduler(), name="demo-reset")
     yield
+    if reaper is not None:
+        reaper.cancel()
     if demo_task is not None:
         demo_task.cancel()
     await jobs.drain()
@@ -157,6 +165,7 @@ def create_app() -> FastAPI:
     limiter.enabled = True
 
     app.include_router(health.router)
+    app.include_router(metrics.router)
     app.include_router(auth.router, prefix="/api/v1")
     app.include_router(users.router, prefix="/api/v1")
     app.include_router(audit.router, prefix="/api/v1")

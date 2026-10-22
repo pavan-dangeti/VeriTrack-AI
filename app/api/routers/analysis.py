@@ -138,6 +138,7 @@ async def export_batch(
     )
     raw_rows = (await db.execute(stmt)).scalars().all()
     rows = [dict(r) for r in raw_rows]
+    await db.commit()   # release the connection before building the file
 
     if cols:
         columns_out = cols
@@ -207,6 +208,7 @@ async def download_report(request: Request, run_id: uuid.UUID, kind: str, actor:
     if actor.role is UserRole.MANAGER and run.manager_id != actor.id:
         raise HTTPException(403, detail={"code": "forbidden", "message": "Not your report"})
 
+    await db.commit()   # release the connection before reading storage
     try:
         data = await asyncio.to_thread(get_storage().get_bytes, report.storage_key)
     except StorageError as exc:

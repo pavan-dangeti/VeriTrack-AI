@@ -1,13 +1,14 @@
 """Job dispatch for batch processing and analysis.
 
-PROCESSING_MODE picks where work runs. Batches left QUEUED/PROCESSING by a restart are resumed on
-startup; the atomic claims in batch_service make that safe across replicas.
+PROCESSING_MODE picks where work runs. A reaper runs at startup and then every half lease: it re-dispatches
+jobs whose worker is gone (app/services/leases.py), so a killed worker's batch is finished by another. Leases
+make duplicate dispatches harmless, which is what lets every replica run the reaper.
 """
 
 import asyncio
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import select, update
+from sqlalchemy import func, or_, select
 
 from app.core.config import settings
 from app.core.logging import get_logger
@@ -20,15 +21,19 @@ _running: set[asyncio.Task] = set()
 
 async def batch_org(factory, batch_id: str):
     """A job runs in the organisation of its batch. The request that queued it may be gone (a Celery worker,
-    or recovery after a restart), so the organisation is looked up rather than inherited."""
-    import uuid
-
+    or the reaper), so the organisation is looked up rather than inherited."""
     from app.models.uploads import UploadBatch
+
+    return await _org_of(factory, UploadBatch, batch_id)
+
+
+async def _org_of(factory, model, row_id: str):
+    import uuid
 
     with tenant(SYSTEM):
         async with factory() as db:
             return (await db.execute(
-                select(UploadBatch.org_id).where(UploadBatch.id == uuid.UUID(batch_id))
+                select(model.org_id).where(model.id == uuid.UUID(str(row_id)))
             )).scalar_one_or_none()
 
 
@@ -42,29 +47,26 @@ async def _process_batch_job(batch_id: str) -> dict:
     from app.db.session import get_session_factory
     from app.services.batch_service import run_batch_processing
 
-    with tenant(await batch_org(get_session_factory(), batch_id)):
-        try:
+    try:
+        with tenant(await batch_org(get_session_factory(), batch_id)):
             async with get_session_factory()() as db:
                 return await run_batch_processing(db, batch_id)
-        except Exception as exc:  # noqa: BLE001 — a job must never kill the loop
-            log.error("batch_job_failed", batch_id=batch_id, exc_info=exc)
-            await _mark_batch_failed(batch_id, exc)
-            return {"status": "error"}
+    except Exception as exc:  # noqa: BLE001 — a job must never kill the loop; the reaper retries it
+        log.error("batch_job_failed", batch_id=batch_id, exc_info=exc)
+        return {"status": "error"}
 
 
-async def _mark_batch_failed(batch_id: str, exc: Exception) -> None:
-    import uuid
-
+async def _process_file_job(file_id) -> None:
     from app.db.session import get_session_factory
-    from app.models.uploads import BatchStatus, UploadBatch
+    from app.models.uploads import UploadedFile
+    from app.services.extraction.pipeline import process_uploaded_file
 
-    async with get_session_factory()() as db:
-        await db.execute(
-            update(UploadBatch)
-            .where(UploadBatch.id == uuid.UUID(batch_id))
-            .values(status=BatchStatus.FAILED, completed_at=datetime.now(UTC))
-        )
-        await db.commit()
+    try:
+        with tenant(await _org_of(get_session_factory(), UploadedFile, file_id)):
+            async with get_session_factory()() as db:
+                await process_uploaded_file(db, file_id)
+    except Exception as exc:  # noqa: BLE001
+        log.error("file_job_failed", file_id=str(file_id), exc_info=exc)
 
 
 async def dispatch_batch(batch_id: str) -> None:
@@ -110,46 +112,40 @@ async def dispatch_analysis(batch_id: str, triggered_by, run_id: str | None = No
     return None
 
 
-async def recover_interrupted_batches(stale_after: timedelta = timedelta(minutes=10)) -> int:
-    if settings.processing_mode != "background":
-        return 0
+async def reap() -> dict:
+    """Re-dispatches every job whose worker is gone: batches whose lease ran out, batches queued for longer
+    than a lease (their dispatch was lost), and files whose lease ran out outside a running batch (an
+    interrupted reprocess request). Returns how many of each."""
     from app.db.session import get_session_factory
+    from app.models.uploads import BatchStatus, UploadBatch, UploadedFile
+    from app.services import leases
 
-    cutoff = datetime.now(UTC) - stale_after
-    with tenant(SYSTEM):  # every organisation's batches
-        stuck = await _requeue_stuck_batches(get_session_factory(), cutoff)
-    for bid in stuck:
-        _spawn(_process_batch_job(str(bid)), f"batch:{bid}")
-    if stuck:
-        log.info("recovered_batches", count=len(stuck))
-    return len(stuck)
+    with tenant(SYSTEM):  # every organisation's jobs
+        async with get_session_factory()() as db:
+            batches = list((await db.execute(select(UploadBatch.id).where(or_(
+                leases.lapsed(UploadBatch),
+                (UploadBatch.status == BatchStatus.QUEUED) & (UploadBatch.created_at < func.now() - leases.length()),
+            )))).scalars())
+            files = list((await db.execute(
+                select(UploadedFile.id).join(UploadBatch, UploadBatch.id == UploadedFile.batch_id)
+                .where(leases.lapsed(UploadedFile), UploadBatch.status != BatchStatus.PROCESSING)
+            )).scalars())
+    for bid in batches:
+        await dispatch_batch(str(bid))
+    for fid in files:
+        _spawn(_process_file_job(fid), f"file:{fid}")
+    if batches or files:
+        log.info("reaped", batches=len(batches), files=len(files))
+    return {"batches": len(batches), "files": len(files)}
 
 
-async def _requeue_stuck_batches(factory, cutoff) -> list:
-    from app.models.uploads import BatchStatus, FileStatus, UploadBatch, UploadedFile
-
-    async with factory() as db:
-        stuck = (
-            await db.execute(
-                select(UploadBatch.id).where(
-                    (UploadBatch.status == BatchStatus.QUEUED)
-                    | ((UploadBatch.status == BatchStatus.PROCESSING)
-                       & (UploadBatch.created_at < cutoff))
-                )
-            )
-        ).scalars().all()
-        if not stuck:
-            return []
-        await db.execute(
-            update(UploadedFile)
-            .where(UploadedFile.batch_id.in_(stuck), UploadedFile.status == FileStatus.PROCESSING)
-            .values(status=FileStatus.QUEUED)
-        )
-        await db.execute(
-            update(UploadBatch).where(UploadBatch.id.in_(stuck)).values(status=BatchStatus.QUEUED)
-        )
-        await db.commit()
-    return list(stuck)
+async def run_reaper() -> None:
+    while True:
+        try:
+            await reap()
+        except Exception as exc:  # noqa: BLE001 — the database may be migrating or briefly away
+            log.warning("reaper_failed", error=str(exc)[:200])
+        await asyncio.sleep(settings.job_lease_seconds / 2)
 
 
 async def recover_interrupted_analyses(stale_after: timedelta = timedelta(minutes=10)) -> int:

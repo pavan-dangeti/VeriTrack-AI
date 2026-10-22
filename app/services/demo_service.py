@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.logging import get_logger
-from app.core.security import hash_password, verify_password
+from app.core.security import hash_password, run_bcrypt, verify_password
 from app.db.tenant import SYSTEM, tenant
 from app.models.analysis import AnalysisRun, GeneratedReport
 from app.models.audit_log import AuditLog
@@ -87,14 +87,14 @@ async def sync_account(db: AsyncSession) -> User | None:
         if admin is None:
             raise SystemExit("ERROR: the demo account needs a Master Admin (set ADMIN_EMAIL / ADMIN_PASSWORD)")
         user = User(email=email, full_name="Demo Manager", role=UserRole.MANAGER, auth_type=AuthType.PASSWORD,
-                    password_hash=await asyncio.to_thread(hash_password, password), created_by=admin.id)
+                    password_hash=await run_bcrypt(hash_password, password), created_by=admin.id)
         db.add(user)
         await db.commit()
         await audit_service.record(db, action=audit_service.ACTION_DEMO_ACCOUNT_CREATED,
                                    result=audit_service.AuditResult.SUCCESS, actor_user_id=admin.id,
                                    target_entity="user", target_id=str(user.id))
-    elif not user.password_hash or not await asyncio.to_thread(verify_password, password, user.password_hash):
-        user.password_hash = await asyncio.to_thread(hash_password, password)
+    elif not user.password_hash or not await run_bcrypt(verify_password, password, user.password_hash):
+        user.password_hash = await run_bcrypt(hash_password, password)
         await db.commit()
     return user
 

@@ -3,14 +3,13 @@
 Role-creation authority and HR scoping live here, not in routers, so every caller gets the same rules.
 """
 
-import asyncio
 import uuid
 
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.security import generate_initial_password, hash_password
+from app.core.security import generate_initial_password, hash_password, run_bcrypt
 from app.models.user import AuthType, User, UserRole
 from app.services import audit_service
 
@@ -53,11 +52,12 @@ async def create_user(
 
     normalized_email = email.strip().lower()
     existing = await get_by_email(db, normalized_email)
+    await db.commit()   # release the connection before bcrypt
     if existing is not None:
         raise UserRuleError(409, "email_taken", "A user with this email already exists")
 
     initial_password = generate_initial_password()
-    password_hash = await asyncio.to_thread(hash_password, initial_password)
+    password_hash = await run_bcrypt(hash_password, initial_password)
     user = User(
         email=normalized_email,
         full_name=(full_name or "").strip() or None,
