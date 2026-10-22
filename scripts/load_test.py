@@ -66,6 +66,7 @@ class Stats:
         self.samples: list[tuple[str, float, float]] = []   # (request kind, when it finished, ms)
         self.errors: list[str] = []
         self.last_sign_in = 0.0   # when the last user's sign-in finished
+        self.transport_retries = 0   # GETs retried after a dropped connection
 
     def add(self, name: str, seconds: float) -> None:
         self.latency.setdefault(name, []).append(seconds * 1000)
@@ -119,7 +120,14 @@ class User:
     async def _timed(self, name: str, method: str, url: str, **kw) -> httpx.Response:
         t = time.perf_counter()
         try:
-            r = await self.http.request(method, url, **kw)
+            try:
+                r = await self.http.request(method, url, **kw)
+            except httpx.TransportError:
+                if method != "GET":
+                    raise
+                # a dropped connection: retried once, as the frontend does (retry: 1 in frontend/src/App.tsx)
+                self.stats.transport_retries += 1
+                r = await self.http.request(method, url, **kw)
         except httpx.HTTPError as exc:
             self.stats.errors.append(f"{name}: {type(exc).__name__}")
             raise FlowError(name) from exc
@@ -327,6 +335,7 @@ async def main() -> int:
         },
         "errors": stats.errors[:20],
         "error_count": len(stats.errors),
+        "transport_retries": stats.transport_retries,
         "latency_overall": stats.overall(exclude=SLOW_BY_DESIGN),
         # the opening window ends when the last user has signed in
         "latency_windows": {
