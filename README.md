@@ -272,7 +272,7 @@ python -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
 cp .env.example .env                        # set ADMIN_PASSWORD
 createdb veritrack                          # or: docker compose up -d db
 .venv/bin/alembic upgrade head
-.venv/bin/python -m app.cli create-master-admin   # admin of the first organisation
+.venv/bin/python -m app.cli create-master-admin   # admin of the first organisation (ADMIN_PASSWORD)
 .venv/bin/python -m app.cli create-organization "Acme Ltd" --admin-email admin@acme.example   # another tenant
 .venv/bin/python -m app.cli verify-audit-log  # exit 1 if any audit chain is broken
 .venv/bin/uvicorn app.main:app --reload     # http://localhost:8000/docs
@@ -280,6 +280,11 @@ createdb veritrack                          # or: docker compose up -d db
 # frontend
 cd frontend && npm ci && npm run dev        # http://localhost:5173
 ```
+
+The two commands that create an account never take its password as an argument and never print or log it.
+`create-master-admin` reads `ADMIN_PASSWORD` (from the environment or `.env`); `create-organization` reads
+`ORG_ADMIN_PASSWORD` from the environment. Without one, in a terminal, each asks for the password twice at a
+hidden prompt; otherwise it stops without creating anything. Passwords are 8 to 72 characters.
 
 Or run the whole stack in containers: `docker compose up --build` → <http://localhost:8080>.
 

@@ -8,6 +8,17 @@ repository, shown next to it in the [README](README.md#quality-and-test-results)
 
 ## [Unreleased]
 
+### Security
+
+- `create-master-admin` and `create-organization` no longer generate a password and print it. The password
+  comes from `ADMIN_PASSWORD` or `ORG_ADMIN_PASSWORD`, or a hidden prompt asked twice, and is never printed,
+  logged or passed as an argument; `create-master-admin --password` is removed.
+
+### Fixed
+
+- Code scanning findings in the tests (side effects inside asserts, requests to a route that does not exist)
+  and in the app (a lambda, a redundant comparison, an implicit string concatenation).
+
 ## [3.0.0] - 2026-10-22
 
 ### Upgrading from 2.0.0
