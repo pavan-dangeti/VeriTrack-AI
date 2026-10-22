@@ -8,7 +8,7 @@ time, that must be none.
 
 import pytest
 
-from app.db.session import engine
+from app.db.session import engine, job_engine
 from app.services import exporters, reporting
 from app.services.storage import LocalDiskBackend
 from tests.helpers import csv_file, manager
@@ -25,7 +25,7 @@ def held(monkeypatch) -> dict[str, list[int]]:
         real = getattr(owner, name)
 
         def watched(*args, **kwargs):
-            seen.setdefault(label, []).append(engine.pool.checkedout())
+            seen.setdefault(label, []).append(engine.pool.checkedout() + job_engine.pool.checkedout())
             return real(*args, **kwargs)
 
         monkeypatch.setattr(owner, name, watched)
@@ -36,7 +36,7 @@ def held(monkeypatch) -> dict[str, list[int]]:
     watch(reporting, "build_summary_pdf", "pdf report")
     for fmt, (content_type, filename, exporter) in list(exporters.EXPORTERS.items()):
         def tracked(*a, _real=exporter, **k):
-            seen.setdefault("export", []).append(engine.pool.checkedout())
+            seen.setdefault("export", []).append(engine.pool.checkedout() + job_engine.pool.checkedout())
             return _real(*a, **k)
 
         monkeypatch.setitem(exporters.EXPORTERS, fmt, (content_type, filename, tracked))

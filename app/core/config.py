@@ -103,6 +103,9 @@ class Settings(BaseSettings):
     db_pool_size: int = 10
     db_max_overflow: int = 20
     db_pool_timeout: int = 30
+    # background jobs' own pool (app/db/session.py), so a burst of jobs cannot starve requests
+    job_db_pool_size: int = 5
+    job_db_max_overflow: int = 5
     # slowapi storage; use redis://… when running more than one API replica
     rate_limit_storage_uri: str = "memory://"
 

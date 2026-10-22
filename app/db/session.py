@@ -27,6 +27,18 @@ def get_session_factory() -> async_sessionmaker[AsyncSession]:
     return _session_factory
 
 
+# Background jobs get a smaller pool of their own: every upload starts a job, and a burst of them could take
+# every connection requests need. With their own pool they can only queue behind each other.
+job_engine = create_async_engine(settings.database_url, **{
+    **_engine_kwargs(), "pool_size": settings.job_db_pool_size, "max_overflow": settings.job_db_max_overflow,
+})
+_job_session_factory: async_sessionmaker[AsyncSession] = async_sessionmaker(job_engine, expire_on_commit=False)
+
+
+def get_job_session_factory() -> async_sessionmaker[AsyncSession]:
+    return _job_session_factory
+
+
 def fresh_engine_and_factory():
     """Dedicated engine per Celery task so asyncpg connections bind to the loop running them."""
     eng = create_async_engine(settings.database_url, pool_pre_ping=True, pool_size=2,

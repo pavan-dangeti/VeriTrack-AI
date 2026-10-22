@@ -165,12 +165,12 @@ async def reset_if_due(db: AsyncSession) -> bool:
 
 
 async def run_scheduler(check_every: timedelta = timedelta(hours=1)) -> None:
-    from app.db.session import get_session_factory
+    from app.db.session import get_job_session_factory
 
     while True:
         try:
             with tenant(await org_id()):
-                async with get_session_factory()() as db:
+                async with get_job_session_factory()() as db:   # the reset processes batches, like a job
                     await reset_if_due(db)
         except (Exception, SystemExit) as exc:  # noqa: BLE001 — a failed reset (or bad DEMO_EMAIL) must not stop the API
             log.warning("demo_reset_failed", error=str(exc)[:200])
