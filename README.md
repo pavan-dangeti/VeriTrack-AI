@@ -7,7 +7,7 @@
 **Timesheet screenshots in, verified leave compliance out.**
 
 VeriTrack reads timesheet screenshots with a purpose-built OCR pipeline, proves every number against
-the sheet's own totals, and flags any customer-side leave that is missing from the company leave register.
+the sheet's own totals, and flags any leave day on a timesheet that is missing from the leave register.
 
 ![Python](https://img.shields.io/badge/Python-3.12-3776AB?style=flat-square&logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.141-009688?style=flat-square&logo=fastapi&logoColor=white)
@@ -33,22 +33,27 @@ Full-quality video: <a href="docs/media/demo.mp4">docs/media/demo.mp4</a></sub>
 - [Quality and test results](#quality-and-test-results)
 - [Getting started](#getting-started) · [Configuration](#configuration) · [Deployment](#deployment)
 - [Roles](#roles-and-permissions) · [Security](#security) · [Project layout](#project-layout) · [Limitations](#known-limitations)
+- Design doc: [docs/design.md](docs/design.md) · Threat model: [docs/threat-model.md](docs/threat-model.md)
 
 ## Why
 
-Every month, managers collect screenshots of each consultant's client-side timesheet and check by hand that
-each *Out Of Office* day booked there also exists in the company's own leave register. It is
-slow, error-prone, and one misread digit sends the wrong email.
+When people record hours in one system and leave in another, someone has to check that the two agree:
+that every *Out Of Office* day on a timesheet is also in the leave register. Done by hand from screenshots,
+it is slow and error-prone, and one misread digit sends the wrong email.
 
-VeriTrack automates the whole loop and is built around one rule: **a number that cannot be proven is never
+VeriTrack automates that loop and is built around one rule: **a number that cannot be proven is never
 acted on.**
+
+VeriTrack is a personal project. Every sheet, person and organisation in it is synthetic; it is not
+affiliated with, built for or used by any employer, and no real company, client or internal system is
+involved.
 
 ## Features
 
 | | |
 |---|---|
 | **Verified OCR** | A geometry-first reader for timesheet screenshots. Every hour is cross-checked against row totals, per-hour-type day totals and grand totals; cells the arithmetic pins down are auto-repaired, anything else is flagged *Needs review*. |
-| **Leave compliance** | Timesheet *Out Of Office* days vs. the company leave register (CSV/Excel import or manual entry). Missing days become violations with the exact dates, an email to the employee (Microsoft Graph), and PDF + Excel reports. |
+| **Leave compliance** | Timesheet *Out Of Office* days vs. the leave register (CSV/Excel import or manual entry). Missing days become violations with the exact dates, an email to the employee (Microsoft Graph), and PDF + Excel reports. |
 | **Sheet review** | The reconstructed, colour-coded grid (optionally side by side with the uploaded screenshot) and the list of verification checks. |
 | **Employee repository** | Versioned master data with inline correction and full history; OCR'd scans of employee lists are supported too. |
 | **Built for teams** | Four roles with enforced scoping, audit log of every security-relevant action, analytics per manager. |
@@ -141,7 +146,7 @@ flowchart TB
     OCR --> FS
 ```
 
-**Design decisions**
+**Design decisions** (the full design, with the alternatives considered: [docs/design.md](docs/design.md))
 
 - **Same-origin API.** Vercel proxies `/api/*` to Render, so the refresh cookie is first-party
   (`SameSite=Strict`) and no CORS preflights are needed.
@@ -331,6 +336,10 @@ endpoint is added without a cross-organisation check.
 - Security headers (HSTS, `nosniff`, `DENY` framing, referrer policy); `/docs` disabled in production.
 - Audit log for logins, user changes, uploads, analyses, exports and settings: append-only for the app and
   hash-chained, verified by `python -m app.cli verify-audit-log` or `GET /api/v1/audit-logs/verify`.
+- CI scans every pull request, `main` and, weekly, the unchanged code
+  ([`.github/workflows/security.yml`](.github/workflows/security.yml)): gitleaks over the tree and the pull
+  request's commits, pip-audit, npm audit, and Trivy over the API image. CodeQL is set up but runs only once
+  the repository is public: GitHub permits it on private code only with a paid add-on.
 - `GET /metrics` exists only when `METRICS_TOKEN` is set and needs it as a bearer token: its queue counts span
   every organisation.
 - Organisations isolated by PostgreSQL row-level security (forced, so it also binds the table owner) under a
@@ -350,7 +359,7 @@ e2e/                  real-browser suite (Playwright)
 scripts/              load test, OCR accuracy report, synthetic sheet generator, README media capture
 test-data/           synthetic timesheets are generated here on demand (git-ignored)
 tests/                backend suite
-docs/                 deployment guide, threat model, OCR benchmark, screenshots, demo video
+docs/                 design doc, threat model, deployment guide, OCR benchmark, screenshots, demo video
 ```
 
 ## Known limitations
