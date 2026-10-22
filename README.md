@@ -52,7 +52,7 @@ acted on.**
 | **Sheet review** | The reconstructed, colour-coded grid (optionally side by side with the uploaded screenshot) and the list of verification checks. |
 | **Employee repository** | Versioned master data with inline correction and full history; OCR'd scans of employee lists are supported too. |
 | **Built for teams** | Four roles with enforced scoping, audit log of every security-relevant action, analytics per manager. |
-| **Fast under load** | Uploads return in milliseconds; OCR runs off the request path with bounded concurrency; API p95 ≈ 110 ms with 50 concurrent users while OCR is saturating the CPU. |
+| **Holds up under load** | OCR runs off the request path with bounded concurrency; with 200 concurrent users on 2 vCPUs, API requests p50 28 ms and p95 181 ms while OCR keeps the CPU busy, every file processed exactly once. |
 | **Polished UI** | Light/dark themes, command palette (`Ctrl/⌘ K`), collapsible sidebar, mobile layout, live progress, accessible components. |
 
 ## Screenshots
@@ -148,9 +148,11 @@ flowchart TB
 - **Never block the event loop.** OCR, PDF/Excel generation, password hashing and storage I/O run in worker
   threads; OCR has its own pool sized by `OCR_CONCURRENCY` at lowered CPU priority, so requests stay fast
   while scans are processed. No database connection is held while a file waits for or runs OCR.
-- **Exactly-once processing.** Files, batches and analyses are claimed with atomic status transitions
-  (`UPDATE … WHERE status … RETURNING`) and a unique run per batch: double clicks, retries and multiple
-  replicas can never process twice. Interrupted batches and analyses resume on startup.
+- **Exactly-once processing, even when a worker dies.** Claiming a batch or a file takes a lease (a token
+  and an expiry the worker keeps renewing), and its results are written only while it still holds the lease.
+  A reaper hands jobs whose lease ran out to another worker, and a worker that froze and wakes up late
+  changes nothing. Tested by killing a real worker process mid-file (`tests/test_worker_crash.py`). Analyses
+  have a unique run per batch and resume on startup.
 - **Tenant isolation in the database.** Every row belongs to an organisation, and PostgreSQL row-level security
   shows each transaction only its own organisation's rows: a query that forgets to filter returns nothing extra.
   Each transaction runs as `veritrack_app`, a role that can never bypass the policies, whatever role the app
@@ -168,16 +170,17 @@ OCR suites use synthetic sheets with invented people and projects, rendered on d
 
 | Suite | What it proves | Result |
 |---|---|---|
-| **Backend** (`pytest tests`) | API, auth, rules, OCR, concurrency, recovery, exports, migrations | **368 passed** |
+| **Backend** (`pytest tests`) | API, auth, rules, OCR, concurrency, recovery, exports, migrations | **378 passed** |
 | &nbsp;&nbsp;OCR regression | 16 synthetic sheets (28–31-day months, 1–9 projects, 4 fonts, 90–150 % zoom) read field-for-field | **16/16 exact** |
 | &nbsp;&nbsp;Capture conditions | 4 sheets × 7 degradations (80–200 % zoom, JPEG q60, blur, noise): every hour, total, status, ID and period | **28/28 exact** |
 | &nbsp;&nbsp;Hostile inputs | cropped totals, cut-off columns, rotation, grayscale, tiny, padded: exact *or* flagged — never verified-and-wrong | **7/7** |
 | &nbsp;&nbsp;Permission matrix | all 42 endpoints × 4 roles + anonymous; cross-manager access to every object type | **0 leaks** |
+| &nbsp;&nbsp;Worker crashes (`pytest tests/test_worker_crash.py`) | a real worker process killed with SIGKILL mid-file, or frozen with SIGSTOP and resumed after its job was taken over | **every file's result written exactly once**; finished files not redone, the frozen worker's late results discarded |
 | &nbsp;&nbsp;Audit log tampering (`pytest tests/test_audit_chain.py`) | edited, re-hashed, deleted, reordered and forged entries made directly in the database; truncated and fully rewritten chains against a recorded head; 40 concurrent writers; the migration's backfill | **every change caught** at the entry where it was made, except what the [threat model](docs/threat-model.md) lists |
 | &nbsp;&nbsp;Organisation isolation (`pytest tests/test_tenant_isolation.py`) | another organisation's 4 roles against every route that takes an id, list, export and write; row-level security per table with raw SQL; passes logged in as a superuser too | **0 leaks** |
-| **Frontend** (`npm test`) | pages, guards, flows, shell | **56 passed** |
+| **Frontend** (`npm test`) | pages, guards, flows, shell | **59 passed** |
 | **End-to-end** (`pytest e2e`, real Chromium) | every page and button for all four roles, uploads, downloads, dark mode, palette, mobile, negative paths; fails on any console error or 5xx | **48 passed**, stable across consecutive runs, also against the production build |
-| **Load** (`scripts/load_test.py`, production mode, 2 vCPU) | 50 concurrent users: 40 managers upload → OCR → analyse while 10 HR users browse continuously | **40/40 results correct, 0 errors, 0 cross-user leaks** |
+| **Load** (`gh workflow run load-test.yml`, 2 vCPU x86-64 runner) | 200 concurrent users: 160 managers upload → OCR → analyse while 40 HR users browse | **160/160 results correct, 0 errors, 0 cross-user leaks; 480/480 files processed exactly once** |
 
 ### OCR benchmark
 
@@ -196,18 +199,38 @@ per-group results and failure analysis: [docs/ocr-benchmark.md](docs/ocr-benchma
 Comparison engine on the same held-out sheets: Tesseract 5 read 27 / 220 exactly (12.3 %), 0 verified but
 wrong, at a median 17.9 s per sheet against RapidOCR's 5.8 s (`-f engine=tesseract`).
 
-Latency during the load test (≈ 38 000 requests, OCR saturating the CPU the whole time):
+### Load test
 
-| Endpoint | p50 | p95 |
-|---|---|---|
-| Dashboard / lists | 23–30 ms | 82–114 ms |
-| Analysis trigger / result | 27–30 ms | 133–273 ms |
-| Timesheet upload (stored + queued) | 0.54 s | 2.1 s |
-| Login, 50 users in the same second | 7 s | 10.5 s |
+`gh workflow run load-test.yml` ([`.github/workflows/load-test.yml`](.github/workflows/load-test.yml),
+[`scripts/load_test.py`](scripts/load_test.py)): PostgreSQL, the API (one web worker, background processing,
+RapidOCR, `OCR_CONCURRENCY=2`) and the load generator on one GitHub-hosted runner, 2 vCPU, 7 GB, x86-64, with
+`ENVIRONMENT=staging` because the runner's database has no TLS. 200 users sign in in the same second; each of
+160 managers uploads an employee repository, a leave register and a timesheet screenshot, polls for OCR the
+way the frontend does (every 1.5 s, slowing to every 10 s as the upload ages), runs the analysis and checks
+it; 40 HR users browse throughout, one page every 5 s. The run took 29 min.
 
-The login burst is bcrypt (cost 12) competing for 2 vCPUs — deliberate slowness that protects passwords; it
-scales with CPU count and is a one-off per session (sessions refresh silently for 7 days).
+| Requests | Count | p50 | p95 | p99 |
+|---|---|---|---|---|
+| **All requests except sign-in and uploads** | 30 101 | **28 ms** | **181 ms** | **4.0 s** |
+| Batch status polling | 15 519 | 29 ms | 462 ms | 5.5 s |
+| Dashboard and lists (HR) | 13 694 | 26–31 ms | 108–127 ms | 1.7–2.6 s |
+| Analysis trigger and result | 478 | 29 ms | 70–76 ms | 118–128 ms |
+| Upload (stored and queued) | 480 | 1.5–1.6 s | 8.7–9.8 s | 12–21 s |
+| Sign-in, 200 users in the same second | 200 | 31 s | 65 s | 70 s |
 
+Every result was correct and no user saw another's data; from `/metrics`, all 480 files were claimed once and
+finished once, with no takeovers and no discarded results. Where it is slow, as measured:
+
+- **The first minutes.** 200 bcrypt sign-ins (cost 12) and 480 uploads arrive together on 2 vCPUs: sign-in
+  takes 31 s at the median, and the p99 of every other request (4 s) comes from this burst.
+- **OCR throughput.** 160 timesheets on two OCR threads: a manager waited 16 min for their sheet at the
+  median, 28 min for the last one. Capacity grows with CPUs and `OCR_CONCURRENCY`, or with Celery workers.
+- **An earlier run starved.** With HR users opening four pages every half second and the frontend polling at
+  a fixed 1.5 s, the API served ~90 requests a second and OCR, which runs at a lower priority, got almost no
+  CPU: 58 of 160 sheets were unfinished after 48 minutes. Polling now backs off, and the HR users browse at
+  a person's pace. Load-test runs also found three bugs, each fixed with a test that failed before: database
+  connections held through bcrypt and through storage, report and export work (pool timeouts, HTTP 500), and
+  bcrypt sharing the default thread pool with storage I/O.
 
 ## Getting started
 
@@ -245,6 +268,9 @@ All settings are environment variables (see [`.env.example`](.env.example)); pro
 | `CORS_ORIGINS` | explicit origins only (not needed with the Vercel rewrite) |
 | `PROCESSING_MODE` | `background` (default) · `celery` (Redis + workers) · `inline` (tests) |
 | `OCR_CONCURRENCY` | sheets read in parallel per API process (≈ CPU cores) |
+| `JOB_LEASE_SECONDS` | how long a worker's claim on a job lasts without renewal (120); a dead worker's job is taken over after it |
+| `JOB_MAX_ATTEMPTS` | a file interrupted this many times in a row is failed instead of retried (3) |
+| `METRICS_TOKEN` | turns on `GET /metrics` (Prometheus) for bearers of this token; unset, the endpoint does not exist |
 | `TRUSTED_PROXY_HOPS` | proxies in front of the API (`2` for Vercel → Render) — used for rate limits and the audit log |
 | `STORAGE_BACKEND` | `local` · `volume` (persistent disk) · `s3` |
 | `OUTBOUND_EMAIL_MODE` | `dry_run` (default, records only) · `live` with `GRAPH_*` credentials |
@@ -269,7 +295,7 @@ cd frontend && npm test && npm run lint && npx tsc -b       # frontend
 # end-to-end (needs the API on :8000 and `npm run dev` or `npm run preview`)
 E2E_ADMIN_EMAIL=... E2E_ADMIN_PASSWORD=... .venv/bin/python -m pytest e2e -q
 # load test against a running API
-ADMIN_EMAIL=... ADMIN_PASSWORD=... .venv/bin/python -m scripts.load_test --managers 40 --hr 10
+ADMIN_EMAIL=... ADMIN_PASSWORD=... .venv/bin/python -m scripts.load_test --managers 160 --hr 40 [--metrics-token T]
 # OCR accuracy report, optionally on your own sheets
 .venv/bin/python -m scripts.eval_ocr_accuracy --variants [--dir DIR]
 ```
@@ -305,6 +331,8 @@ endpoint is added without a cross-organisation check.
 - Security headers (HSTS, `nosniff`, `DENY` framing, referrer policy); `/docs` disabled in production.
 - Audit log for logins, user changes, uploads, analyses, exports and settings: append-only for the app and
   hash-chained, verified by `python -m app.cli verify-audit-log` or `GET /api/v1/audit-logs/verify`.
+- `GET /metrics` exists only when `METRICS_TOKEN` is set and needs it as a bearer token: its queue counts span
+  every organisation.
 - Organisations isolated by PostgreSQL row-level security (forced, so it also binds the table owner) under a
   role that cannot bypass it; a row cannot be read, written or created outside the current organisation.
 
