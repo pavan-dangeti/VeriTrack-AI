@@ -4,7 +4,8 @@ import io
 
 from tests.conftest import MA_EMAIL, MA_PASSWORD
 
-REPO_CSV = b"Employee ID,Full Name,Company Email,Personal Email,Dept\nE-100,Ann Weaver,ann@corp.io,ann@gmail.com,Ops\n"
+REPO_CSV = (b"Employee ID,Full Name,Company Email,Personal Email,Dept\n"
+            b"E-100,Ann Weaver,ann@corp.example.com,ann@mail.example.com,Ops\n")
 TIMESHEET_CSV = b"Employee ID,Full Name,Total\nE-100,Ann Weaver,8\n"
 
 
@@ -163,7 +164,7 @@ class TestEmployeeDetail:
         body = r.json()
         assert body["employee_code"] == "E-100"
         assert body["full_name"] == "Ann Weaver"
-        assert body["official_email"] == "ann@corp.io"
+        assert body["official_email"] == "ann@corp.example.com"
         assert len(body["versions"]) == 1 and body["versions"][0]["change_source"] == "UPLOAD"
         assert len(body["timesheet_batches"]) == 1
 

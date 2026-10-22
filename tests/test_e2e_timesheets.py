@@ -14,10 +14,10 @@ from tests.conftest import (
 )
 
 REPO_CSV = b"""Employee ID,Full Name,Company Email,Personal Email,Dept
-E-100,Ann Weaver,ann.weaver@corp.io,ann.w@gmail.com,Operations
-E-200,Bob Chen,,bob.chen@gmail.com,Sales
+E-100,Ann Weaver,ann.weaver@corp.example.com,ann.w@mail.example.com,Operations
+E-200,Bob Chen,,bob.chen@mail.example.com,Sales
 E-300,Cid Reyes,,,HR
-E-400,Dia Patel,dia.patel@corp.io,,Finance
+E-400,Dia Patel,dia.patel@corp.example.com,,Finance
 """
 
 # File A: violations, a no-violation, ghost employee, unreadable row
@@ -110,9 +110,9 @@ class TestEndToEnd:
         assert codes == {"E-100", "E-300", "E-400"}
 
         by_code = {v["employee_code"]: v for v in analysis["violations"]}
-        assert by_code["E-100"]["email_to"] == "ann.weaver@corp.io"
+        assert by_code["E-100"]["email_to"] == "ann.weaver@corp.example.com"
         assert by_code["E-100"]["email_status"] == "SENT"
-        assert by_code["E-400"]["email_to"] == "dia.patel@corp.io"
+        assert by_code["E-400"]["email_to"] == "dia.patel@corp.example.com"
         assert by_code["E-300"]["email_status"] == "SKIPPED_NO_EMAIL"
 
         skip_statuses = {s["status"] for s in analysis["skipped_rows"]}

@@ -16,7 +16,7 @@ from tests.conftest import (
 )
 
 REPO_CSV = b"""Employee ID,Full Name,Company Email,Personal Email,Dept
-E-100,Ann Weaver,ann.weaver@corp.io,ann.w@gmail.com,Operations
+E-100,Ann Weaver,ann.weaver@corp.example.com,ann.w@mail.example.com,Operations
 """
 TIMESHEET_CSV = """EMP CODE,Emp Name,Customer Leave,Company Leave
 E-100,Ann Weaver,✓,

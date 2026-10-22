@@ -101,7 +101,8 @@ class TestUploadLimits:
     async def test_same_sheet_uploaded_twice_counts_once(self, client, ma_user_id):
         h = await manager(client, "edge.dupe")
         await client.post("/api/v1/uploads?kind=EMPLOYEE_REPO",
-                          files=[csv_file("r.csv", "Employee ID,Full Name,Company Email\nE-1,Ann,a@corp.io\n")],
+                          files=[csv_file("r.csv",
+                                          "Employee ID,Full Name,Company Email\nE-1,Ann,a@corp.example.com\n")],
                           headers=h)
         csv = "Employee ID,Name,Customer Leave,Company Leave\nE-1,Ann,x,\n"
         batch = (await client.post("/api/v1/uploads?kind=TIMESHEET",

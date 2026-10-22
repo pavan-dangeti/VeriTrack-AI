@@ -13,7 +13,7 @@ from app.services import exporters, reporting
 from app.services.storage import LocalDiskBackend
 from tests.helpers import csv_file, manager
 
-REPO = "Employee ID,Full Name,Company Email\nE-1,Ann,ann@corp.io\n"
+REPO = "Employee ID,Full Name,Company Email\nE-1,Ann,ann@corp.example.com\n"
 SHEET = "Employee ID,Name,Customer Leave,Company Leave\nE-1,Ann,x,\n"
 
 

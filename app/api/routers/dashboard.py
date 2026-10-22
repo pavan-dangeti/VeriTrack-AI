@@ -139,7 +139,7 @@ async def approve_domain(body: DomainIn, actor: MasterAdminOnly, db: DB):
         raise HTTPException(
             422,
             detail={"code": "bad_domain",
-                    "message": "Enter a valid domain like corp.io"},
+                    "message": "Enter a valid domain like corp.example.com"},
         )
     existing = (
         await db.execute(select(ApprovedM365Domain).where(ApprovedM365Domain.domain == domain))

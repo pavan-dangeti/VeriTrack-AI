@@ -14,7 +14,7 @@ from tests.conftest import (
 )
 
 EXPECTED_CODES = [r[0] for r in ROWS]
-EXPECTED_EMAILS = ["alice.m@corp.io", "bob.t@gmail.com", "carol@corp.io"]
+EXPECTED_EMAILS = ["alice.m@corp.example.com", "bob.t@mail.example.com", "carol@corp.example.com"]
 
 async def _make_manager(client):
     login = await client.post(

@@ -8,13 +8,13 @@ from tests.conftest import (
 )
 
 REPO_V1 = b"""Employee ID,Full Name,Company Email,Personal Email,Dept
-E-100,Ann Weaver,ann@corp.io,ann@gmail.com,Ops
-E-200,Bob Chen,bob@corp.io,,
+E-100,Ann Weaver,ann@corp.example.com,ann@mail.example.com,Ops
+E-200,Bob Chen,bob@corp.example.com,,
 """
 
 REPO_V2 = b"""Employee ID,Full Name,Company Email,Personal Email,Dept
-E-100,Ann Weaver-Smith,ann@corp.io,ann@gmail.com,Ops
-E-200,Bob Chen,bob@corp.io,,
+E-100,Ann Weaver-Smith,ann@corp.example.com,ann@mail.example.com,Ops
+E-200,Bob Chen,bob@corp.example.com,,
 E-300,Cid Reyes,,,
 """
 
@@ -85,7 +85,7 @@ class TestVersioning:
 
         r = await client.patch(
             f"/api/v1/employees/{bob['id']}",
-            json={"department": "Marketing", "personal_email": "bobby@x.com",
+            json={"department": "Marketing", "personal_email": "bobby@x2.example.com",
                   "note": "moved teams"},
             headers=headers,
         )
@@ -96,7 +96,7 @@ class TestVersioning:
         current = (await client.get("/api/v1/employees", headers=headers)).json()
         bob_now = next(e for e in current["items"] if e["employee_code"] == "E-200")
         assert bob_now["department"] == "Marketing"
-        assert bob_now["official_email"] == "bob@corp.io"  # untouched fields kept
+        assert bob_now["official_email"] == "bob@corp.example.com"  # untouched fields kept
 
         history = (await client.get(
             f"/api/v1/employees/{bob['id']}/history", headers=headers)).json()

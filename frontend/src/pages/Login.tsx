@@ -123,7 +123,7 @@ export function LoginPage() {
               label="Email"
               type="email"
               autoComplete="username"
-              placeholder="you@company.com"
+              placeholder="you@example.com"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               error={fieldError.email}

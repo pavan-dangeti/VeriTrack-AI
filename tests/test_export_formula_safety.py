@@ -16,7 +16,7 @@ PAYLOADS = [
     "\x0b=vertical-tab",
 ]
 
-SAFE = ["Ann Weaver", "E-100", "8", "Ops", "", "name-with-dash@inside.it"]
+SAFE = ["Ann Weaver", "E-100", "8", "Ops", "", "name-with-dash@inside.example.com"]
 
 
 class TestExportEscaping:

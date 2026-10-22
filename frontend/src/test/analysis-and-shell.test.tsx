@@ -8,7 +8,7 @@ import type { ReactNode } from "react";
 
 vi.mock("../auth/AuthContext", () => ({
   AuthProvider: ({ children }: { children: ReactNode }) => <>{children}</>,
-  useAuth: () => ({ user: { id: "u", email: "mgr@x.io", full_name: "Harish N", role: "MANAGER" }, loading: false, logout: vi.fn() }),
+  useAuth: () => ({ user: { id: "u", email: "mgr@x.example.com", full_name: "Harish N", role: "MANAGER" }, loading: false, logout: vi.fn() }),
 }));
 
 vi.mock("../api/client", () => ({

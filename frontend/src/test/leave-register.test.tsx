@@ -13,7 +13,7 @@ const state = vi.hoisted(() => ({
 
 vi.mock("../auth/AuthContext", () => ({
   AuthProvider: ({ children }: { children: ReactNode }) => <>{children}</>,
-  useAuth: () => ({ user: { id: "u", email: "m@x.io", role: state.role }, loading: false }),
+  useAuth: () => ({ user: { id: "u", email: "m@x.example.com", role: state.role }, loading: false }),
 }));
 
 vi.mock("../api/client", () => ({

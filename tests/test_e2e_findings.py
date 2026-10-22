@@ -15,7 +15,7 @@ from app.models.uploads import UploadedFile
 from tests.conftest import open_session
 from tests.helpers import admin, create_user, csv_file, manager
 
-REPO = "Employee ID,Full Name,Company Email\nE-1,Ann,ann@corp.io\nE-2,Bob,bob@corp.io\n"
+REPO = "Employee ID,Full Name,Company Email\nE-1,Ann,ann@corp.example.com\nE-2,Bob,bob@corp.example.com\n"
 TIMESHEET_CSV = "Employee ID,Name,Customer Leave,Company Leave\nE-1,Ann,x,\nE-2,Bob,x,x\n"
 
 
@@ -57,7 +57,7 @@ class TestDashboardScope:
     async def test_hr_sees_only_their_managers_numbers(self, client, ma_user_id):
         other = await manager(client, "f.other")
         await client.post("/api/v1/uploads?kind=EMPLOYEE_REPO",
-                          files=[csv_file("r.csv", REPO + "E-3,Cid,c@corp.io\n")], headers=other)
+                          files=[csv_file("r.csv", REPO + "E-3,Cid,c@corp.example.com\n")], headers=other)
         h, _ = await _analysed_batch(client, "f.scope")
         _, hr = await create_user(client, h, "f.scope.hr@veritrack.io", "HR")
         body = (await client.get("/api/v1/dashboard/summary", headers=hr)).json()

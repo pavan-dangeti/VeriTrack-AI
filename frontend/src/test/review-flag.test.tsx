@@ -47,8 +47,8 @@ let flaggedRows: Array<Record<string, any>> = [
     manager_id: "m1",
     employee_code: "s-404", // OCR case mismatch vs the repository's S-404
     full_name: "Dev Patel",
-    official_email: "dev.p@corp.io",
-    personal_email: "dev@gmail.com",
+    official_email: "dev.p@corp.example.com",
+    personal_email: "dev@mail.example.com",
     department: "",
     needs_review: true,
     review_note: "Possible case mismatch vs repository: S-404",

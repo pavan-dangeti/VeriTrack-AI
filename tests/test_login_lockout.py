@@ -55,7 +55,7 @@ class TestLogin:
 
     async def test_unknown_email_same_error_as_wrong_password(self, client, ma_user_id):
         ghost = await client.post(
-            "/api/v1/auth/login", json={"email": "ghost@nowhere.com", "password": WRONG}
+            "/api/v1/auth/login", json={"email": "ghost@nowhere.example.com", "password": WRONG}
         )
         known_bad = await client.post(
             "/api/v1/auth/login", json={"email": MA_EMAIL, "password": WRONG}

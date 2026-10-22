@@ -94,7 +94,7 @@ export function ManageUsersPage() {
             </p>
             <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
               <Input label="Full name" value={fullName} onChange={(e) => setFullName(e.target.value)} placeholder="Priya Nair" />
-              <Input label="Email" value={email} onChange={(e) => setEmail(e.target.value)} error={errors.email} placeholder="new.manager@corp.io" />
+              <Input label="Email" value={email} onChange={(e) => setEmail(e.target.value)} error={errors.email} placeholder="new.manager@corp.example.com" />
             </div>
             <div className="mt-4 flex flex-wrap items-end gap-4">
               <label className="block">
@@ -189,7 +189,7 @@ function DomainManager({
         <input
           value={domain}
           onChange={(e) => setDomain(e.target.value)}
-          placeholder="corp.io"
+          placeholder="corp.example.com"
           aria-label="Domain to approve"
           className="w-56 rounded-lg border border-gray-300 px-3 py-2 text-sm"
         />

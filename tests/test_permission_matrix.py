@@ -128,7 +128,7 @@ async def two_managers(client, ma_user_id):
     _, b = await create_user(client, ma, "pm.b@veritrack.io", MG)
     _, hr_b = await create_user(client, b, "pm.b.hr@veritrack.io", HR)
     await client.post("/api/v1/uploads?kind=EMPLOYEE_REPO",
-                      files=[csv_file("r.csv", "Employee ID,Full Name,Company Email\nE-1,Ann,ann@corp.io\n")],
+                      files=[csv_file("r.csv", "Employee ID,Full Name,Company Email\nE-1,Ann,ann@corp.example.com\n")],
                       headers=a)
     sheet_batch = (await client.post("/api/v1/uploads?kind=TIMESHEET",
                               files=[csv_file("g.csv", "Employee ID,Name,Customer Leave,Company Leave\nE-1,Ann,x,\n")],

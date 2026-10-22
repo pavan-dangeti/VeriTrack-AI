@@ -17,11 +17,11 @@ async def _login(client, email: str, headers: dict | None = None) -> int:
 class TestLoginRateLimit:
     async def test_login_over_limit_within_minute_is_429(self, client):
         # Distinct emails so account lockout never interferes with the count.
-        statuses = [await _login(client, f"ratelimit-{i}@nowhere.com") for i in range(LOGIN_MAX + 1)]
+        statuses = [await _login(client, f"ratelimit-{i}@nowhere.example.com") for i in range(LOGIN_MAX + 1)]
         assert all(s == 401 for s in statuses[:LOGIN_MAX]), statuses
         assert statuses[LOGIN_MAX] == 429
         r = await client.post("/api/v1/auth/login",
-                              json={"email": "ratelimit-extra@nowhere.com", "password": "Whatever!123"})
+                              json={"email": "ratelimit-extra@nowhere.example.com", "password": "Whatever!123"})
         assert r.status_code == 429
         assert "retry-after" in {k.lower() for k in r.headers}
 
@@ -29,7 +29,7 @@ class TestLoginRateLimit:
         # The proxy (one hop) appends the real address; the client controls only
         # the entries to its left.
         statuses = [
-            await _login(client, f"spoof-{i}@nowhere.com",
+            await _login(client, f"spoof-{i}@nowhere.example.com",
                          {"X-Forwarded-For": f"10.0.{i}.1, 203.0.113.9"})
             for i in range(LOGIN_MAX + 1)
         ]
@@ -37,12 +37,12 @@ class TestLoginRateLimit:
 
     async def test_different_real_clients_have_separate_buckets(self, client):
         for i in range(LOGIN_MAX):
-            assert await _login(client, f"a-{i}@nowhere.com", {"X-Forwarded-For": "198.51.100.1"}) == 401
-        assert await _login(client, "b@nowhere.com", {"X-Forwarded-For": "198.51.100.2"}) == 401
+            assert await _login(client, f"a-{i}@nowhere.example.com", {"X-Forwarded-For": "198.51.100.1"}) == 401
+        assert await _login(client, "b@nowhere.example.com", {"X-Forwarded-For": "198.51.100.2"}) == 401
 
     async def test_limiter_reset_between_tests(self, client):
         limiter.reset()
-        assert await _login(client, "fresh@nowhere.com") == 401
+        assert await _login(client, "fresh@nowhere.example.com") == 401
 
 
 @pytest.mark.parametrize(

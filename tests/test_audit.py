@@ -38,7 +38,7 @@ class TestLoginAuditing:
     async def test_unknown_email_failure_recorded_without_actor(self, client, ma_user_id):
         await client.post(
             "/api/v1/auth/login",
-            json={"email": "ghost@nowhere.com", "password": "Whatever!123"},
+            json={"email": "ghost@nowhere.example.com", "password": "Whatever!123"},
         )
         # it belongs to no organisation, so no organisation's admin sees it
         assert await _count(AuditResult.FAILURE, audit_service.ACTION_LOGIN) == 0

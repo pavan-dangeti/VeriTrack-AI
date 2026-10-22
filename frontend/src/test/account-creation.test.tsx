@@ -77,7 +77,7 @@ function renderManageUsers(role: "MASTER_ADMIN" | "MANAGER" = "MASTER_ADMIN") {
   vi.mock("../auth/AuthContext", () => ({
     AuthProvider: ({ children }: { children: ReactNode }) => <>{children}</>,
     useAuth: () => ({
-      user: { id: "u1", email: `${role.toLowerCase()}@x.io`, role },
+      user: { id: "u1", email: `${role.toLowerCase()}@x.example.com`, role },
       loading: false,
       login: vi.fn(),
       logout: vi.fn(),
@@ -99,7 +99,7 @@ function renderHrTeam() {
   vi.mock("../auth/AuthContext", () => ({
     AuthProvider: ({ children }: { children: ReactNode }) => <>{children}</>,
     useAuth: () => ({
-      user: { id: "mgr1", email: "mgr@x.io", role: "MANAGER" },
+      user: { id: "mgr1", email: "mgr@x.example.com", role: "MANAGER" },
       loading: false,
       login: vi.fn(),
       logout: vi.fn(),
@@ -162,13 +162,13 @@ describe("account-creation flows (role hierarchy enforcement)", () => {
       renderManageUsers("MASTER_ADMIN");
       await waitFor(() => screen.getByTestId("create-user"));
 
-      const emailInput = screen.getByPlaceholderText("new.manager@corp.io");
-      fireEvent.change(emailInput, { target: { value: "exec@corp.io" } });
+      const emailInput = screen.getByPlaceholderText("new.manager@corp.example.com");
+      fireEvent.change(emailInput, { target: { value: "exec@corp.example.com" } });
       fireEvent.change(screen.getByLabelText("Role"), { target: { value: "EXECUTIVE" } });
       fireEvent.click(screen.getByTestId("create-user"));
 
       await waitFor(() => screen.getByRole("dialog", { name: /account created/i }));
-      expect(screen.getByRole("dialog")).toHaveTextContent("exec@corp.io");
+      expect(screen.getByRole("dialog")).toHaveTextContent("exec@corp.example.com");
       expect(screen.getByRole("dialog")).toHaveTextContent("EXECUTIVE");
       expect(screen.getByLabelText("Initial password")).toHaveValue("TempPass!123");
       expect(screen.getByRole("button", { name: /copy/i })).toBeInTheDocument();
@@ -178,8 +178,8 @@ describe("account-creation flows (role hierarchy enforcement)", () => {
       renderManageUsers("MASTER_ADMIN");
       await waitFor(() => screen.getByTestId("create-user"));
 
-      const emailInput = screen.getByPlaceholderText("new.manager@corp.io");
-      fireEvent.change(emailInput, { target: { value: "exec2@corp.io" } });
+      const emailInput = screen.getByPlaceholderText("new.manager@corp.example.com");
+      fireEvent.change(emailInput, { target: { value: "exec2@corp.example.com" } });
       fireEvent.change(screen.getByLabelText("Role"), { target: { value: "EXECUTIVE" } });
       fireEvent.click(screen.getByTestId("create-user"));
 
@@ -195,12 +195,12 @@ describe("account-creation flows (role hierarchy enforcement)", () => {
       fireEvent.click(screen.getByTestId("create-user"));
       expect(screen.getByText("Enter a valid email")).toBeInTheDocument();
 
-      const emailInput = screen.getByPlaceholderText("new.manager@corp.io");
+      const emailInput = screen.getByPlaceholderText("new.manager@corp.example.com");
       fireEvent.change(emailInput, { target: { value: "bad" } });
       fireEvent.click(screen.getByTestId("create-user"));
       expect(screen.getByText("Enter a valid email")).toBeInTheDocument();
 
-      fireEvent.change(emailInput, { target: { value: "good@corp.io" } });
+      fireEvent.change(emailInput, { target: { value: "good@corp.example.com" } });
       fireEvent.change(screen.getByLabelText("Role"), { target: { value: "INVALID" } });
       fireEvent.click(screen.getByTestId("create-user"));
       expect(screen.getByText("Role must be Manager or Executive")).toBeInTheDocument();
@@ -212,32 +212,32 @@ describe("account-creation flows (role hierarchy enforcement)", () => {
       renderManageUsers("MASTER_ADMIN");
       await waitFor(() => screen.getByTestId("create-user"));
 
-      fireEvent.change(screen.getByLabelText("Email"), { target: { value: "mgr@corp.io" } });
+      fireEvent.change(screen.getByLabelText("Email"), { target: { value: "mgr@corp.example.com" } });
       fireEvent.change(screen.getByLabelText("Role"), { target: { value: "MANAGER" } });
       fireEvent.click(screen.getByTestId("create-user"));
 
       await waitFor(() => screen.getByRole("dialog"));
       expect(screen.getByRole("dialog")).toHaveTextContent("MANAGER");
-      expect(screen.getByRole("dialog")).toHaveTextContent("mgr@corp.io");
+      expect(screen.getByRole("dialog")).toHaveTextContent("mgr@corp.example.com");
     });
   });
 
   describe("M365 domain approval", () => {
     it("approves domain and shows it in list", async () => {
       renderManageUsers("MASTER_ADMIN");
-      await waitFor(() => screen.getByPlaceholderText("corp.io"));
+      await waitFor(() => screen.getByPlaceholderText("corp.example.com"));
 
-      const input = screen.getByPlaceholderText("corp.io");
-      fireEvent.change(input, { target: { value: "corp.io" } });
+      const input = screen.getByPlaceholderText("corp.example.com");
+      fireEvent.change(input, { target: { value: "corp.example.com" } });
       fireEvent.click(screen.getByText("Approve domain"));
 
-      await waitFor(() => expect(screen.getByText("corp.io")).toBeInTheDocument());
-      expect(screen.getByText("corp.io")).toHaveClass("bg-success-100");
+      await waitFor(() => expect(screen.getByText("corp.example.com")).toBeInTheDocument());
+      expect(screen.getByText("corp.example.com")).toHaveClass("bg-success-100");
     });
 
     it("validates domain input", async () => {
       renderManageUsers("MASTER_ADMIN");
-      await waitFor(() => screen.getByPlaceholderText("corp.io"));
+      await waitFor(() => screen.getByPlaceholderText("corp.example.com"));
 
       fireEvent.click(screen.getByText("Approve domain"));
       // empty string still calls API - backend validates; frontend just clears input
@@ -248,7 +248,7 @@ describe("account-creation flows (role hierarchy enforcement)", () => {
     it("disables and re-enables a manager", async () => {
       usersList = [
         { id: "u1", email: "admin@veritrack.io", role: "MASTER_ADMIN", is_active: true },
-        { id: "u2", email: "mgr@corp.io", role: "MANAGER", is_active: true },
+        { id: "u2", email: "mgr@corp.example.com", role: "MANAGER", is_active: true },
       ];
       apiMock.get.mockImplementation((path: string) => {
         if (path === "/users") return Promise.resolve({ items: usersList, total: usersList.length });
@@ -258,17 +258,17 @@ describe("account-creation flows (role hierarchy enforcement)", () => {
       });
 
       renderManageUsers("MASTER_ADMIN");
-      await waitFor(() => screen.getByText("mgr@corp.io"));
+      await waitFor(() => screen.getByText("mgr@corp.example.com"));
 
-      const disableBtn = screen.getAllByText("Disable").find((b) => b.closest("tr")?.textContent?.includes("mgr@corp.io"));
+      const disableBtn = screen.getAllByText("Disable").find((b) => b.closest("tr")?.textContent?.includes("mgr@corp.example.com"));
       fireEvent.click(disableBtn!);
-      await waitFor(() => expect(screen.getAllByText("Enable").find((b) => b.closest("tr")?.textContent?.includes("mgr@corp.io"))).toBeInTheDocument());
-      expect(screen.getAllByText("Disabled").find((t) => t.closest("tr")?.textContent?.includes("mgr@corp.io"))).toBeInTheDocument();
+      await waitFor(() => expect(screen.getAllByText("Enable").find((b) => b.closest("tr")?.textContent?.includes("mgr@corp.example.com"))).toBeInTheDocument());
+      expect(screen.getAllByText("Disabled").find((t) => t.closest("tr")?.textContent?.includes("mgr@corp.example.com"))).toBeInTheDocument();
 
-      const enableBtn = screen.getAllByText("Enable").find((b) => b.closest("tr")?.textContent?.includes("mgr@corp.io"));
+      const enableBtn = screen.getAllByText("Enable").find((b) => b.closest("tr")?.textContent?.includes("mgr@corp.example.com"));
       fireEvent.click(enableBtn!);
-      await waitFor(() => expect(screen.getAllByText("Disable").find((b) => b.closest("tr")?.textContent?.includes("mgr@corp.io"))).toBeInTheDocument());
-      expect(screen.getAllByText("Active").find((t) => t.closest("tr")?.textContent?.includes("mgr@corp.io"))).toBeInTheDocument();
+      await waitFor(() => expect(screen.getAllByText("Disable").find((b) => b.closest("tr")?.textContent?.includes("mgr@corp.example.com"))).toBeInTheDocument());
+      expect(screen.getAllByText("Active").find((t) => t.closest("tr")?.textContent?.includes("mgr@corp.example.com"))).toBeInTheDocument();
     });
   });
 });
@@ -278,11 +278,11 @@ describe("MANAGER creates HR", () => {
     renderHrTeam();
     await waitFor(() => screen.getByRole("button", { name: /create hr account/i }));
 
-    fireEvent.change(screen.getByLabelText("HR email"), { target: { value: "hr@corp.io" } });
+    fireEvent.change(screen.getByLabelText("HR email"), { target: { value: "hr@corp.example.com" } });
     fireEvent.click(screen.getByRole("button", { name: /create hr account/i }));
 
     await waitFor(() => screen.getByRole("dialog", { name: /account created/i }));
-    expect(screen.getByRole("dialog")).toHaveTextContent("hr@corp.io");
+    expect(screen.getByRole("dialog")).toHaveTextContent("hr@corp.example.com");
     expect(screen.getByRole("dialog")).toHaveTextContent("HR");
     expect(screen.getByLabelText("Initial password")).toHaveValue("TempPass!123");
     expect(screen.getByRole("button", { name: /copy/i })).toBeInTheDocument();
@@ -296,24 +296,24 @@ describe("MANAGER creates HR", () => {
     expect(screen.getByText("Enter a valid email")).toBeInTheDocument();
 
     const hrEmailInput = screen.getByText("HR email").closest("label")?.querySelector("input") as HTMLInputElement;
-    fireEvent.change(hrEmailInput, { target: { value: "hr@corp.io" } });
+    fireEvent.change(hrEmailInput, { target: { value: "hr@corp.example.com" } });
     fireEvent.click(screen.getByRole("button", { name: /create hr account/i }));
     await waitFor(() => screen.getByRole("dialog"));
   });
 
   it("lists created HR accounts", async () => {
     usersList = [
-      { id: "mgr1", email: "mgr@x.io", role: "MANAGER", is_active: true },
-      { id: "hr1", email: "hr@corp.io", role: "HR", is_active: true },
+      { id: "mgr1", email: "mgr@x.example.com", role: "MANAGER", is_active: true },
+      { id: "hr1", email: "hr@corp.example.com", role: "HR", is_active: true },
     ];
     apiMock.get.mockImplementation((path: string) => {
       if (path === "/users") return Promise.resolve({ items: usersList, total: usersList.length });
-      if (path === "/auth/me") return Promise.resolve({ id: "mgr1", email: "mgr@x.io", role: "MANAGER" });
+      if (path === "/auth/me") return Promise.resolve({ id: "mgr1", email: "mgr@x.example.com", role: "MANAGER" });
       return Promise.resolve({});
     });
 
     renderHrTeam();
-    await waitFor(() => screen.getByText("hr@corp.io"));
+    await waitFor(() => screen.getByText("hr@corp.example.com"));
     expect(screen.getByTestId("hr-team-table")).toBeInTheDocument();
   });
 });

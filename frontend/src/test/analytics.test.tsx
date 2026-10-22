@@ -59,10 +59,10 @@ describe("analytics page", () => {
       ],
       emails: { sent: 3, missing: 1, errored: 0, skipped: 0 },
       by_manager: [
-        { manager_id: "m1", manager_name: "Ann Manager", manager_email: "a@x.io", violations: 4, runs: 2, batches: 2 },
+        { manager_id: "m1", manager_name: "Ann Manager", manager_email: "a@x.example.com", violations: 4, runs: 2, batches: 2 },
       ],
     };
-    mockAuth.user = { id: "ma", email: "ma@x.io", role: "MASTER_ADMIN" };
+    mockAuth.user = { id: "ma", email: "ma@x.example.com", role: "MASTER_ADMIN" };
     renderAt("/analytics");
     expect(await screen.findByTestId("analytics-page")).toBeInTheDocument();
     expect(screen.getByText("Violations over time")).toBeInTheDocument();
@@ -80,7 +80,7 @@ describe("analytics page", () => {
       ],
       emails: { sent: 0, missing: 0, errored: 0, skipped: 0 },
     };
-    mockAuth.user = { id: "m1", email: "m@x.io", role: "MANAGER" };
+    mockAuth.user = { id: "m1", email: "m@x.example.com", role: "MANAGER" };
     renderAt("/analytics");
     expect(await screen.findByTestId("analytics-page")).toBeInTheDocument();
     expect(screen.getByText("Your workspace only.")).toBeInTheDocument();
@@ -89,7 +89,7 @@ describe("analytics page", () => {
 
   it("shows the empty state when there is no data", async () => {
     payload = { scoped_to_self: true, monthly: [], emails: { sent: 0, missing: 0, errored: 0, skipped: 0 } };
-    mockAuth.user = { id: "m2", email: "m2@x.io", role: "MANAGER" };
+    mockAuth.user = { id: "m2", email: "m2@x.example.com", role: "MANAGER" };
     renderAt("/analytics");
     expect(await screen.findByTestId("analytics-page")).toBeInTheDocument();
     expect(await screen.findByText("No analytics yet")).toBeInTheDocument();
@@ -103,7 +103,7 @@ describe("analytics page", () => {
       ],
       emails: { sent: 0, missing: 0, errored: 0, skipped: 0 },
     };
-    mockAuth.user = { id: "h1", email: "h@x.io", role: "HR" };
+    mockAuth.user = { id: "h1", email: "h@x.example.com", role: "HR" };
     renderAt("/analytics");
     expect(await screen.findByTestId("analytics-page")).toBeInTheDocument();
     expect(screen.getByText("Your manager's workspace.")).toBeInTheDocument();

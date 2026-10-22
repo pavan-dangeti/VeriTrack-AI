@@ -54,38 +54,38 @@ describe("route protection (direct-URL semantics)", () => {
   });
 
   it("MANAGER typing /users lands on access-denied", () => {
-    mockAuth.user = { id: "u1", email: "m@x.io", role: "MANAGER" };
+    mockAuth.user = { id: "u1", email: "m@x.example.com", role: "MANAGER" };
     renderAt("/users");
     expect(screen.getByTestId("denied-path")).toBeInTheDocument();
     expect(screen.queryByTestId("users-table")).not.toBeInTheDocument();
   });
 
   it("HR typing /timesheets is denied", () => {
-    mockAuth.user = { id: "u2", email: "h@x.io", role: "HR" };
+    mockAuth.user = { id: "u2", email: "h@x.example.com", role: "HR" };
     renderAt("/timesheets");
     expect(screen.getByTestId("denied-path")).toBeInTheDocument();
   });
 
   it("HR typing /employees is denied", () => {
-    mockAuth.user = { id: "u2b", email: "h2@x.io", role: "HR" };
+    mockAuth.user = { id: "u2b", email: "h2@x.example.com", role: "HR" };
     renderAt("/employees");
     expect(screen.getByTestId("denied-path")).toBeInTheDocument();
   });
 
   it("EXECUTIVE typing /audit-logs is denied", () => {
-    mockAuth.user = { id: "u3", email: "e@x.io", role: "EXECUTIVE" };
+    mockAuth.user = { id: "u3", email: "e@x.example.com", role: "EXECUTIVE" };
     renderAt("/audit-logs");
     expect(screen.getByTestId("denied-path")).toBeInTheDocument();
   });
 
   it("EXECUTIVE CAN open /all-reports (mirrored visibility)", () => {
-    mockAuth.user = { id: "u5", email: "e5@x.io", role: "EXECUTIVE" };
+    mockAuth.user = { id: "u5", email: "e5@x.example.com", role: "EXECUTIVE" };
     renderAt("/all-reports");
     expect(screen.getByText("All Reports")).toBeInTheDocument();
   });
 
   it("MASTER_ADMIN can open /users", async () => {
-    mockAuth.user = { id: "u4", email: "a@x.io", role: "MASTER_ADMIN" };
+    mockAuth.user = { id: "u4", email: "a@x.example.com", role: "MASTER_ADMIN" };
     renderAt("/users");
     expect(await screen.findByTestId("create-user")).toBeInTheDocument();
   });

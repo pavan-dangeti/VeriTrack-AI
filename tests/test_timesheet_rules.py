@@ -41,10 +41,10 @@ class TestViolationRule:
 
 class TestCheckRowClassification:
     REPO = {
-        "e001": {"full_name": "Ann", "official_email": "ann@c.io",
-                 "personal_email": "ann@p.io"},
+        "e001": {"full_name": "Ann", "official_email": "ann@c.example.com",
+                 "personal_email": "ann@p.example.com"},
         "e002": {"full_name": "Bob", "official_email": None,
-                 "personal_email": "bob@p.io"},
+                 "personal_email": "bob@p.example.com"},
         "e003": {"full_name": "Cid", "official_email": None, "personal_email": None},
     }
 
@@ -55,7 +55,7 @@ class TestCheckRowClassification:
             repo_lookup=self.REPO,
         )
         assert status == "MATCHED_VIOLATION"
-        assert payload["email_to"] == "ann@c.io"  # official wins
+        assert payload["email_to"] == "ann@c.example.com"  # official wins
 
     def test_falls_back_to_personal_email(self):
         status, payload = timesheet_rules.check_row(
@@ -64,7 +64,7 @@ class TestCheckRowClassification:
             repo_lookup=self.REPO,
         )
         assert status == "MATCHED_VIOLATION"
-        assert payload["email_to"] == "bob@p.io"
+        assert payload["email_to"] == "bob@p.example.com"
 
     def test_no_email_flagged_not_sent(self):
         status, payload = timesheet_rules.check_row(
@@ -113,13 +113,13 @@ class TestNormalization:
     def test_row_normalization_with_extras(self):
         row = normalize_row(
             self.HEADERS,
-            ["E-100", "Dana Smith", "DANA@corp.io ", "dana@gmail.com",
+            ["E-100", "Dana Smith", "DANA@corp.example.com ", "dana@mail.example.com",
              "Ops", "✓", ""],
         )
         assert row.values["employee_code"] == "E-100"
         assert row.values["full_name"] == "Dana Smith"
-        assert row.values["official_email"] == "dana@corp.io"
-        assert row.values["personal_email"] == "dana@gmail.com"
+        assert row.values["official_email"] == "dana@corp.example.com"
+        assert row.values["personal_email"] == "dana@mail.example.com"
         assert row.values["department"] == "Ops"
         assert row.values["customer_leave"] == "✓"
         assert row.values["company_leave"] == ""

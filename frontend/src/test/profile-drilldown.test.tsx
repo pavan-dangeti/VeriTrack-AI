@@ -14,14 +14,14 @@ const mockAuth = vi.hoisted(() => ({
 
 const MANAGER_PROFILE = {
   id: "m1",
-  email: "mgr@corp.io",
+  email: "mgr@corp.example.com",
   role: "MANAGER",
   auth_type: "PASSWORD",
   is_active: true,
   manager_id: null,
   created_at: "2026-01-02T09:00:00Z",
   last_login_at: "2026-08-30T08:00:00Z",
-  hr_accounts: [{ id: "h1", email: "hr@corp.io", is_active: true }],
+  hr_accounts: [{ id: "h1", email: "hr@corp.example.com", is_active: true }],
   employee_count: 3,
   timesheet_batches_total: 2,
   timesheet_batches_completed: 1,
@@ -32,14 +32,14 @@ const MANAGER_PROFILE = {
 
 const HR_PROFILE = {
   id: "h1",
-  email: "hr@corp.io",
+  email: "hr@corp.example.com",
   role: "HR",
   auth_type: "PASSWORD",
   is_active: true,
   manager_id: "m1",
   created_at: "2026-02-02T09:00:00Z",
   last_login_at: "2026-08-29T08:00:00Z",
-  manager: { id: "m1", email: "mgr@corp.io" },
+  manager: { id: "m1", email: "mgr@corp.example.com" },
 };
 
 const EMP_DETAIL = {
@@ -47,14 +47,14 @@ const EMP_DETAIL = {
   manager_id: "m1",
   employee_code: "E-100",
   full_name: "Ann Weaver",
-  official_email: "ann@corp.io",
+  official_email: "ann@corp.example.com",
   personal_email: null,
   department: "Ops",
   needs_review: false,
   review_note: null,
   ocr_confidence: 0.98,
   versions: [
-    { version: 1, full_name: "Ann Weaver", official_email: "ann@corp.io", personal_email: null, department: "Ops", change_source: "UPLOAD", created_at: "2026-03-01T00:00:00Z" },
+    { version: 1, full_name: "Ann Weaver", official_email: "ann@corp.example.com", personal_email: null, department: "Ops", change_source: "UPLOAD", created_at: "2026-03-01T00:00:00Z" },
   ],
   timesheet_batches: [
     { id: "b1", status: "COMPLETED", total_files: 4, created_at: "2026-07-01T10:00:00Z" },
@@ -99,18 +99,18 @@ function renderAt(path: string) {
   );
 }
 
-const manager = { id: "m1", email: "mgr@corp.io", role: "MANAGER" as Role };
+const manager = { id: "m1", email: "mgr@corp.example.com", role: "MANAGER" as Role };
 
 describe("profile pages", () => {
   it("MANAGER own /profile shows identity + role counters + HR list", async () => {
     mockAuth.user = manager;
     renderAt("/profile");
     expect(await screen.findByTestId("user-profile-page")).toBeInTheDocument();
-    expect(screen.getAllByText("mgr@corp.io").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("mgr@corp.example.com").length).toBeGreaterThan(0);
     expect(screen.getByText("HR accounts")).toBeInTheDocument();
     expect(screen.getByText("Employees in repository")).toBeInTheDocument();
     expect(screen.getByText("1 / 2")).toBeInTheDocument(); // timesheets completed/total
-    const link = screen.getByRole("link", { name: "hr@corp.io" });
+    const link = screen.getByRole("link", { name: "hr@corp.example.com" });
     expect(link).toHaveAttribute("href", "/people/h1");
   });
 
@@ -119,18 +119,18 @@ describe("profile pages", () => {
     renderAt("/people/h1");
     expect(await screen.findByTestId("user-profile-page")).toBeInTheDocument();
     expect(screen.getByText("Reports to")).toBeInTheDocument();
-    const mgrLink = screen.getByRole("link", { name: "mgr@corp.io" });
+    const mgrLink = screen.getByRole("link", { name: "mgr@corp.example.com" });
     expect(mgrLink).toHaveAttribute("href", "/people/m1");
     expect(screen.getByTestId("back-button")).toBeInTheDocument();
   });
 
   it("HR own /profile shows 'Reports to' as plain text (no drill-up link)", async () => {
-    mockAuth.user = { id: "h1", email: "hr@corp.io", role: "HR" };
+    mockAuth.user = { id: "h1", email: "hr@corp.example.com", role: "HR" };
     renderAt("/profile");
     expect(await screen.findByTestId("user-profile-page")).toBeInTheDocument();
     expect(screen.getByText("Reports to")).toBeInTheDocument();
-    expect(screen.getByText("mgr@corp.io")).toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: "mgr@corp.io" })).not.toBeInTheDocument();
+    expect(screen.getByText("mgr@corp.example.com")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "mgr@corp.example.com" })).not.toBeInTheDocument();
   });
 
   it("MANAGER employee detail shows record, versions, and batches", async () => {
@@ -147,21 +147,21 @@ describe("profile pages", () => {
 
 describe("drill-down route protection", () => {
   it("HR typing /people/h1 directly is denied", () => {
-    mockAuth.user = { id: "h1", email: "hr@corp.io", role: "HR" };
+    mockAuth.user = { id: "h1", email: "hr@corp.example.com", role: "HR" };
     renderAt("/people/h1");
     expect(screen.getByTestId("denied-path")).toBeInTheDocument();
     expect(screen.queryByTestId("user-profile-page")).not.toBeInTheDocument();
   });
 
   it("HR typing /employees/e1 directly is denied", () => {
-    mockAuth.user = { id: "h1", email: "hr@corp.io", role: "HR" };
+    mockAuth.user = { id: "h1", email: "hr@corp.example.com", role: "HR" };
     renderAt("/employees/e1");
     expect(screen.getByTestId("denied-path")).toBeInTheDocument();
     expect(screen.queryByTestId("employee-detail-page")).not.toBeInTheDocument();
   });
 
   it("EXECUTIVE can drill into a manager profile", async () => {
-    mockAuth.user = { id: "x1", email: "exec@corp.io", role: "EXECUTIVE" };
+    mockAuth.user = { id: "x1", email: "exec@corp.example.com", role: "EXECUTIVE" };
     renderAt("/people/m1");
     expect(await screen.findByTestId("user-profile-page")).toBeInTheDocument();
     expect(screen.getByText("Timesheet batch history")).toBeInTheDocument();

@@ -62,7 +62,7 @@ class TestMasterAdminUniqueness:
             err = await _try_insert(
                 db,
                 """INSERT INTO users (role, email, auth_type, password_hash)
-                   VALUES ('MASTER_ADMIN', 'second-ma@x.com', 'PASSWORD', :h)""",
+                   VALUES ('MASTER_ADMIN', 'second-ma@x2.example.com', 'PASSWORD', :h)""",
                 {"h": FAKE_HASH},
             )
         assert err is not None, "2nd MA in one organisation must violate uq_users_master_admin_per_org"
@@ -204,7 +204,7 @@ class TestUserCreationEndpoints:
 
     async def test_unauthenticated_create_rejected(self, client, ma_user_id):
         r = await client.post(
-            "/api/v1/users", json={"email": "anon@x.com", "role": "MANAGER"}
+            "/api/v1/users", json={"email": "anon@x2.example.com", "role": "MANAGER"}
         )
         assert r.status_code == 401
 

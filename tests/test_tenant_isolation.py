@@ -23,9 +23,9 @@ from tests.conftest import open_session
 from tests.helpers import admin, create_user, csv_file, login
 from tests.test_permission_matrix import EX, EXPECTED, HR, MA, MG, PUBLIC
 
-A_REPO = "Employee ID,Full Name,Company Email\nA-100,Alice Alpha,alice@alpha-corp.io\n"
+A_REPO = "Employee ID,Full Name,Company Email\nA-100,Alice Alpha,alice@alpha-corp.example.com\n"
 A_SHEET = "Employee ID,Name,Customer Leave,Company Leave\nA-100,Alice Alpha,x,\n"
-B_REPO = "Employee ID,Full Name,Company Email\nB-200,Bob Beta,bob@beta-corp.io\n"
+B_REPO = "Employee ID,Full Name,Company Email\nB-200,Bob Beta,bob@beta-corp.example.com\n"
 
 # a route's path carries one of A's ids: B must get 404 (or 403 where its role may not call the route)
 PROBE = "probe"
@@ -114,12 +114,12 @@ async def _org_a(client) -> dict:
     employee_id = (await client.get("/api/v1/employees", headers=mg)).json()["items"][0]["id"]
     await client.post("/api/v1/leaves", json={"employee_code": "A-100", "start_date": "2026-07-01"}, headers=mg)
     leave_id = (await client.get("/api/v1/leaves", headers=mg)).json()["items"][0]["id"]
-    assert (await client.post("/api/v1/settings/m365-domains", json={"domain": "alpha-corp.io"},
+    assert (await client.post("/api/v1/settings/m365-domains", json={"domain": "alpha-corp.example.com"},
                               headers=ma)).status_code == 201
     ids = {"user_id": mgr_id, "batch_id": batch["id"], "file_id": detail["files"][0]["id"], "run_id": run_id,
            "employee_id": employee_id, "leave_id": str(leave_id), "kind": "summary.pdf"}
     # anything that identifies A's data, as it would appear in a response
-    markers = ["A-100", "Alice Alpha", "alice@alpha-corp.io", "alpha-corp.io", "alpha-repo.csv",
+    markers = ["A-100", "Alice Alpha", "alice@alpha-corp.example.com", "alpha-corp.example.com", "alpha-repo.csv",
                "alpha-sheet.csv", "@alpha.example", "ma@veritrack.io",
                *(v for k, v in ids.items() if k not in ("kind", "leave_id"))]
     return {MA: ma, EX: ex, MG: mg, HR: hr, "ids": ids, "markers": markers}
@@ -229,7 +229,7 @@ async def test_writes_stay_inside_the_organisation(client, orgs, monkeypatch):
     assert (await client.get("/api/v1/leaves", headers=a[MG])).json()["total"] == 1
 
     # a domain belongs to one organisation
-    r = await client.post("/api/v1/settings/m365-domains", json={"domain": "alpha-corp.io"}, headers=b[MA])
+    r = await client.post("/api/v1/settings/m365-domains", json={"domain": "alpha-corp.example.com"}, headers=b[MA])
     assert r.status_code == 409 and r.json()["error"]["code"] == "domain_taken"
     assert (await client.get("/api/v1/settings/m365-domains", headers=b[MA])).json()["items"] == []
 
@@ -241,12 +241,12 @@ async def test_writes_stay_inside_the_organisation(client, orgs, monkeypatch):
 
 
 async def test_m365_sign_in_needs_the_domains_organisation(client, orgs, monkeypatch):
-    """alpha-corp.io is approved by A; an account with that e-mail in B must not sign in through it."""
+    """alpha-corp.example.com is approved by A; an account with that e-mail in B must not sign in through it."""
     from app.services import m365_service
 
     a, b = orgs["a"], orgs["b"]
-    await create_user(client, b[MA], "eve@alpha-corp.io", EX)
-    await create_user(client, a[MA], "carol@alpha-corp.io", EX)
+    await create_user(client, b[MA], "eve@alpha-corp.example.com", EX)
+    await create_user(client, a[MA], "carol@alpha-corp.example.com", EX)
     monkeypatch.setattr(settings, "m365_client_id", "id")
     monkeypatch.setattr(settings, "m365_client_secret", "secret")
 
@@ -262,8 +262,8 @@ async def test_m365_sign_in_needs_the_domains_organisation(client, orgs, monkeyp
                                "veritrack_sso_verifier": "v"})
         return await client.get("/api/v1/auth/m365/callback", params={"state": "s", "code": email})
 
-    assert (await sign_in("carol@alpha-corp.io")).status_code == 200
-    r = await sign_in("eve@alpha-corp.io")
+    assert (await sign_in("carol@alpha-corp.example.com")).status_code == 200
+    r = await sign_in("eve@alpha-corp.example.com")
     assert r.status_code == 403 and r.json()["error"]["code"] == "account_unavailable"
 
 

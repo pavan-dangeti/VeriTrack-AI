@@ -9,10 +9,10 @@ import io
 from PIL import Image, ImageDraw, ImageFont
 
 ROWS = [
-    ("S-101", "Alice Munro", "alice.m@corp.io", "", "YES"),
-    ("S-202", "Bob Tan", "", "bob.t@gmail.com", "✓"),
-    ("S-303", "Carol Dias", "carol@corp.io", "", ""),
-    ("S-404", "Dev Patel", "dev.p@corp.io", "dev@gmail.com", "[x]"),
+    ("S-101", "Alice Munro", "alice.m@corp.example.com", "", "YES"),
+    ("S-202", "Bob Tan", "", "bob.t@mail.example.com", "✓"),
+    ("S-303", "Carol Dias", "carol@corp.example.com", "", ""),
+    ("S-404", "Dev Patel", "dev.p@corp.example.com", "dev@mail.example.com", "[x]"),
     ("S-505", "Eva Roy", "", "", "x"),
 ]
 

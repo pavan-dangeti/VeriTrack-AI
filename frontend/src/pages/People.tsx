@@ -135,7 +135,7 @@ function HrCreateForm() {
     <>
       <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
         <Input label="Full name" value={fullName} onChange={(e) => setFullName(e.target.value)} placeholder="Sam Ortiz" />
-        <Input label="HR email" value={email} onChange={(e) => setEmail(e.target.value)} error={error ?? undefined} placeholder="hr@corp.io" />
+        <Input label="HR email" value={email} onChange={(e) => setEmail(e.target.value)} error={error ?? undefined} placeholder="hr@corp.example.com" />
       </div>
       <div className="mt-4">
         <Button onClick={submit}>Create HR account</Button>
