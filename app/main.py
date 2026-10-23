@@ -143,7 +143,7 @@ async def lifespan(app: FastAPI):
 def create_app() -> FastAPI:
     app = FastAPI(
         title="VeriTrack AI API",
-        version="3.0.0",
+        version="3.1.0",
         docs_url="/docs" if not settings.is_production else None,
         redoc_url=None,
         lifespan=lifespan,

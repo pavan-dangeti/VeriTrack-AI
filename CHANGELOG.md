@@ -8,6 +8,13 @@ repository, shown next to it in the [README](README.md#quality-and-test-results)
 
 ## [Unreleased]
 
+## [3.1.0] - 2026-10-23
+
+### Upgrading from 3.0.0
+
+- `create-master-admin --password` is gone. Set `ADMIN_PASSWORD` (or answer the hidden prompt) instead; for
+  `create-organization`, set `ORG_ADMIN_PASSWORD`. Neither command prints a generated password any more.
+
 ### Security
 
 - `create-master-admin` and `create-organization` no longer generate a password and print it. The password
@@ -106,6 +113,7 @@ The initial version.
   Excel reports.
 - Render blueprints and Vercel configuration.
 
-[Unreleased]: https://github.com/pavan-dangeti/VeriTrack-AI/compare/v3.0.0...HEAD
+[Unreleased]: https://github.com/pavan-dangeti/VeriTrack-AI/compare/v3.1.0...HEAD
+[3.1.0]: https://github.com/pavan-dangeti/VeriTrack-AI/compare/v3.0.0...v3.1.0
 [3.0.0]: https://github.com/pavan-dangeti/VeriTrack-AI/compare/v2.0.0...v3.0.0
 [2.0.0]: https://github.com/pavan-dangeti/VeriTrack-AI/releases/tag/v2.0.0
